@@ -1,0 +1,30 @@
+version: '3.9'
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: villageconnect-mongo
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    environment:
+      MONGO_INITDB_DATABASE: villageconnect
+    volumes:
+      - mongo_data:/data/db
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.1
+    container_name: villageconnect-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - '9200:9200'
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+
+volumes:
+  mongo_data:
+  elasticsearch_data:
