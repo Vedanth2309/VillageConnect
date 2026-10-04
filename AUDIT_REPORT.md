@@ -1,7 +1,9 @@
 # VillageConnect implementation audit
 
 **Audit date:** 2026-10-04  
-**Scope:** Current working-tree contents of this repository. This is a source inspection, not a change proposal or a runtime/security test.
+**Scope:** Baseline working-tree contents at the initial audit. This was a source inspection, not a runtime/security test.
+
+> **Historical baseline:** This report predates the later roadmap implementation. Its findings describe that earlier baseline and are not a current assessment of the repository.
 
 ## Executive summary
 

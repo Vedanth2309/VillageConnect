@@ -19,19 +19,23 @@ import (
 )
 
 type API struct {
-	Users      *services.UserService
-	Catalog    *services.CatalogService
-	Orders     *services.OrderService
-	Deliveries *services.DeliveryService
-	Admin      *services.AdminService
-	Search     *search.Service
-	JWTSecret  string
+	Users         *services.UserService
+	Catalog       *services.CatalogService
+	Orders        *services.OrderService
+	Deliveries    *services.DeliveryService
+	Reviews       *services.ReviewService
+	Notifications *services.NotificationService
+	Admin         *services.AdminService
+	Search        *search.Service
+	JWTSecret     string
 }
 
 func NewAPI(users *services.UserService, catalog *services.CatalogService, orders *services.OrderService,
-	deliveries *services.DeliveryService, admin *services.AdminService, productSearch *search.Service, secret string) *API {
+	deliveries *services.DeliveryService, reviews *services.ReviewService, notifications *services.NotificationService,
+	admin *services.AdminService,
+	productSearch *search.Service, secret string) *API {
 	return &API{
-		Users: users, Catalog: catalog, Orders: orders, Deliveries: deliveries,
+		Users: users, Catalog: catalog, Orders: orders, Deliveries: deliveries, Reviews: reviews, Notifications: notifications,
 		Admin: admin, Search: productSearch, JWTSecret: secret,
 	}
 }
@@ -209,16 +213,342 @@ func (api *API) Me(c *gin.Context) {
 	success(c, http.StatusOK, gin.H{"user": publicUser(*user)})
 }
 
+func (api *API) ListNotifications(c *gin.Context) {
+	userID, _ := middleware.Identity(c)
+	limit := 20
+	if raw := c.Query("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			invalid(c, "Invalid notification limit")
+			return
+		}
+		limit = parsed
+	}
+	notifications, err := api.Notifications.List(c.Request.Context(), userID, limit)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	success(c, http.StatusOK, gin.H{"notifications": notifications})
+}
+
+func (api *API) UnreadNotificationCount(c *gin.Context) {
+	userID, _ := middleware.Identity(c)
+	count, err := api.Notifications.UnreadCount(c.Request.Context(), userID)
+	if err != nil {
+		serverError(c, err)
+		return
+	}
+	success(c, http.StatusOK, gin.H{"unread": count})
+}
+
+func (api *API) MarkNotificationRead(c *gin.Context) {
+	userID, _ := middleware.Identity(c)
+	if err := api.Notifications.MarkRead(c.Request.Context(), userID, c.Param("id")); err != nil {
+		writeError(c, err)
+		return
+	}
+	success(c, http.StatusOK, gin.H{"message": "Notification marked as read"})
+}
+
+func (api *API) RequestSellerVerification(c *gin.Context) {
+	userID, role := middleware.Identity(c)
+	if role != string(models.RoleSeller) {
+		forbidden(c)
+		return
+	}
+	if err := api.Users.RequestSellerVerification(c.Request.Context(), userID); err != nil {
+		writeError(c, err)
+		return
+	}
+	success(c, http.StatusOK, gin.H{"message": "Verification request submitted"})
+}
+
 func (api *API) ListUsers(c *gin.Context) {
 	users, err := api.Users.List(c.Request.Context())
 	if err != nil {
 		serverError(c, err)
 		return
 	}
-	for i := range users {
-		users[i] = publicUser(users[i])
+	query := strings.ToLower(strings.TrimSpace(c.Query("q")))
+	roleFilter := strings.TrimSpace(c.Query("role"))
+	filtered := make([]models.User, 0, len(users))
+	for _, user := range users {
+		if roleFilter != "" && string(user.Role) != roleFilter {
+			continue
+		}
+		if query != "" && !strings.Contains(strings.ToLower(user.Name+" "+user.Email+" "+user.Phone), query) {
+			continue
+		}
+		if user.Active == nil {
+			active := true
+			user.Active = &active
+		}
+		if user.Role == models.RoleSeller && user.SellerStatus == "" {
+			if user.Verified {
+				user.SellerStatus = "approved"
+			} else {
+				user.SellerStatus = "pending"
+			}
+		}
+		filtered = append(filtered, publicUser(user))
 	}
-	success(c, http.StatusOK, gin.H{"users": users})
+	success(c, http.StatusOK, gin.H{"users": filtered})
+}
+
+func (api *API) AdminSellers(c *gin.Context) {
+	users, err := api.Users.List(c.Request.Context())
+	if err != nil {
+		serverError(c, err)
+		return
+	}
+	sellers := make([]models.User, 0)
+	for _, user := range users {
+		if user.Role != models.RoleSeller {
+			continue
+		}
+		if user.Active == nil {
+			active := true
+			user.Active = &active
+		}
+		if user.SellerStatus == "" {
+			if user.Verified {
+				user.SellerStatus = "approved"
+			} else {
+				user.SellerStatus = "pending"
+			}
+		}
+		sellers = append(sellers, publicUser(user))
+	}
+	success(c, http.StatusOK, gin.H{"sellers": sellers})
+}
+
+func (api *API) AdminAgents(c *gin.Context) {
+	users, err := api.Users.List(c.Request.Context())
+	if err != nil {
+		serverError(c, err)
+		return
+	}
+	agents := make([]models.User, 0)
+	for _, user := range users {
+		if user.Role != models.RoleDeliveryAgent {
+			continue
+		}
+		if user.Active == nil {
+			active := true
+			user.Active = &active
+		}
+		agents = append(agents, publicUser(user))
+	}
+	success(c, http.StatusOK, gin.H{"agents": agents})
+}
+
+func (api *API) AdminVillages(c *gin.Context) {
+	villages, err := api.Admin.Villages(c.Request.Context())
+	if err != nil {
+		serverError(c, err)
+		return
+	}
+	success(c, http.StatusOK, gin.H{"villages": villages})
+}
+
+func (api *API) AdminCategories(c *gin.Context) {
+	categories, err := api.Admin.Categories(c.Request.Context())
+	if err != nil {
+		serverError(c, err)
+		return
+	}
+	success(c, http.StatusOK, gin.H{"categories": categories})
+}
+
+func (api *API) AdminProducts(c *gin.Context) {
+	products, err := api.Admin.Products(c.Request.Context())
+	if err != nil {
+		serverError(c, err)
+		return
+	}
+	success(c, http.StatusOK, gin.H{"products": products})
+}
+
+func (api *API) AdminOrders(c *gin.Context) {
+	orders, err := api.Admin.Orders(c.Request.Context())
+	if err != nil {
+		serverError(c, err)
+		return
+	}
+	success(c, http.StatusOK, gin.H{"orders": orders})
+}
+
+func (api *API) AdminSetUserActive(c *gin.Context) {
+	adminID, _ := middleware.Identity(c)
+	user, err := api.Users.GetByID(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	var payload struct {
+		Active *bool `json:"active"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil || payload.Active == nil {
+		invalid(c, "An active boolean is required")
+		return
+	}
+	if adminID == c.Param("id") && !*payload.Active {
+		invalid(c, "An administrator cannot deactivate their own account")
+		return
+	}
+	if err := api.Admin.SetUserActive(c.Request.Context(), c.Param("id"), *payload.Active); err != nil {
+		writeError(c, err)
+		return
+	}
+	if user.Role == models.RoleSeller && api.Search != nil {
+		if err := api.Search.Reindex(c.Request.Context()); err != nil {
+			log.Printf("seller account changed but search reindex failed: %v", err)
+		}
+	}
+	success(c, http.StatusOK, gin.H{"message": "User status updated"})
+}
+
+func (api *API) AdminSetAgentActive(c *gin.Context) {
+	user, err := api.Users.GetByID(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	if user.Role != models.RoleDeliveryAgent {
+		invalid(c, "Account is not a delivery agent")
+		return
+	}
+	api.AdminSetUserActive(c)
+}
+
+func (api *API) AdminSetSellerStatus(c *gin.Context) {
+	var payload struct {
+		Action string `json:"action"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		invalid(c, "Invalid seller status payload")
+		return
+	}
+	if err := api.Admin.SetSellerState(c.Request.Context(), c.Param("id"), payload.Action); err != nil {
+		writeError(c, err)
+		return
+	}
+	if api.Search != nil {
+		if err := api.Search.Reindex(c.Request.Context()); err != nil {
+			log.Printf("seller status changed but search reindex failed: %v", err)
+		}
+	}
+	success(c, http.StatusOK, gin.H{"message": "Seller status updated"})
+}
+
+func (api *API) AdminCreateVillage(c *gin.Context) {
+	var village models.Village
+	if err := c.ShouldBindJSON(&village); err != nil {
+		invalid(c, "Invalid village payload")
+		return
+	}
+	if village.ID != "" {
+		invalid(c, "Village ID cannot be supplied")
+		return
+	}
+	village.ID = fmt.Sprintf("v%d", time.Now().UnixNano())
+	if err := api.Admin.CreateVillage(c.Request.Context(), village); err != nil {
+		writeError(c, err)
+		return
+	}
+	success(c, http.StatusCreated, gin.H{"village": village})
+}
+
+func (api *API) AdminUpdateVillage(c *gin.Context) {
+	var payload models.Village
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		invalid(c, "Invalid village payload")
+		return
+	}
+	payload.ID = c.Param("id")
+	if err := api.Admin.UpdateVillage(c.Request.Context(), payload); err != nil {
+		writeError(c, err)
+		return
+	}
+	success(c, http.StatusOK, gin.H{"village": payload})
+}
+
+func (api *API) AdminSetVillageActive(c *gin.Context) {
+	var payload struct {
+		Active *bool `json:"active"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil || payload.Active == nil {
+		invalid(c, "An active boolean is required")
+		return
+	}
+	if err := api.Admin.SetVillageActive(c.Request.Context(), c.Param("id"), *payload.Active); err != nil {
+		writeError(c, err)
+		return
+	}
+	success(c, http.StatusOK, gin.H{"message": "Village status updated"})
+}
+
+func (api *API) AdminCreateCategory(c *gin.Context) {
+	var category models.Category
+	if err := c.ShouldBindJSON(&category); err != nil {
+		invalid(c, "Invalid category payload")
+		return
+	}
+	if category.ID != "" {
+		invalid(c, "Category ID cannot be supplied")
+		return
+	}
+	category.ID = fmt.Sprintf("c%d", time.Now().UnixNano())
+	if err := api.Admin.CreateCategory(c.Request.Context(), category); err != nil {
+		writeError(c, err)
+		return
+	}
+	success(c, http.StatusCreated, gin.H{"category": category})
+}
+
+func (api *API) AdminUpdateCategory(c *gin.Context) {
+	var payload models.Category
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		invalid(c, "Invalid category payload")
+		return
+	}
+	payload.ID = c.Param("id")
+	if err := api.Admin.UpdateCategory(c.Request.Context(), payload); err != nil {
+		writeError(c, err)
+		return
+	}
+	success(c, http.StatusOK, gin.H{"category": payload})
+}
+
+func (api *API) AdminSetCategoryActive(c *gin.Context) {
+	var payload struct {
+		Active *bool `json:"active"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil || payload.Active == nil {
+		invalid(c, "An active boolean is required")
+		return
+	}
+	if err := api.Admin.SetCategoryActive(c.Request.Context(), c.Param("id"), *payload.Active); err != nil {
+		writeError(c, err)
+		return
+	}
+	success(c, http.StatusOK, gin.H{"message": "Category status updated"})
+}
+
+func (api *API) AdminSetProductAvailability(c *gin.Context) {
+	var payload struct {
+		Available *bool `json:"available"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil || payload.Available == nil {
+		invalid(c, "An available boolean is required")
+		return
+	}
+	if err := api.Catalog.SetProductAvailability(c.Request.Context(), c.Param("id"), *payload.Available); err != nil {
+		writeError(c, err)
+		return
+	}
+	success(c, http.StatusOK, gin.H{"message": "Product availability updated"})
 }
 
 func (api *API) ListOrders(c *gin.Context) {
@@ -298,10 +628,93 @@ func (api *API) GetOrderTracking(c *gin.Context) {
 		writeError(c, err)
 		return
 	}
+	delivery, err := api.Deliveries.ForOrder(c.Request.Context(), order.ID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
 	success(c, http.StatusOK, gin.H{"tracking": gin.H{
 		"orderId": order.ID, "status": order.Status, "fulfillmentType": order.FulfillmentType,
-		"statusHistory": order.StatusHistory, "updatedAt": order.UpdatedAt,
+		"statusHistory": order.StatusHistory, "updatedAt": order.UpdatedAt, "delivery": delivery,
 	}})
+}
+
+func (api *API) OrderReviews(c *gin.Context) {
+	userID, _ := middleware.Identity(c)
+	order, err := api.Orders.Get(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	if order.CustomerID != userID {
+		forbidden(c)
+		return
+	}
+	reviews, err := api.Reviews.ForOrder(c.Request.Context(), order.ID)
+	if err != nil {
+		serverError(c, err)
+		return
+	}
+	success(c, http.StatusOK, gin.H{"reviews": reviews})
+}
+
+func (api *API) ListReviews(c *gin.Context) {
+	var reviews []models.Review
+	var err error
+	switch {
+	case c.Query("productId") != "":
+		reviews, err = api.Reviews.ForProduct(c.Request.Context(), c.Query("productId"))
+	case c.Query("sellerId") != "":
+		reviews, err = api.Reviews.ForSeller(c.Request.Context(), c.Query("sellerId"))
+	default:
+		invalid(c, "A productId or sellerId is required")
+		return
+	}
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	success(c, http.StatusOK, gin.H{"reviews": reviews})
+}
+
+func (api *API) ProductReviews(c *gin.Context) {
+	reviews, err := api.Reviews.ForProduct(c.Request.Context(), c.Param("productId"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	success(c, http.StatusOK, gin.H{"reviews": reviews})
+}
+
+func (api *API) SellerReviews(c *gin.Context) {
+	reviews, err := api.Reviews.ForSeller(c.Request.Context(), c.Param("sellerId"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	success(c, http.StatusOK, gin.H{"reviews": reviews})
+}
+
+func (api *API) CreateReview(c *gin.Context) {
+	var payload struct {
+		OrderID       string `json:"orderId"`
+		ProductID     string `json:"productId"`
+		ProductRating int    `json:"productRating"`
+		SellerRating  int    `json:"sellerRating"`
+		Comment       string `json:"comment"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		invalid(c, "Invalid review payload")
+		return
+	}
+	userID, _ := middleware.Identity(c)
+	review, err := api.Reviews.Create(c.Request.Context(), userID, payload.OrderID, payload.ProductID,
+		payload.ProductRating, payload.SellerRating, payload.Comment)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	success(c, http.StatusCreated, gin.H{"review": review})
 }
 
 func (api *API) CreateOrder(c *gin.Context) {
@@ -524,7 +937,7 @@ func (api *API) Sellers(c *gin.Context) {
 	}
 	sellers := make([]gin.H, 0)
 	for _, user := range users {
-		if user.Role == models.RoleSeller && user.Verified {
+		if user.Role == models.RoleSeller && user.Verified && user.IsActive() {
 			sellers = append(sellers, sellerProfile(user))
 		}
 	}
@@ -537,7 +950,7 @@ func (api *API) GetSeller(c *gin.Context) {
 		writeError(c, err)
 		return
 	}
-	if user.Role != models.RoleSeller || !user.Verified {
+	if user.Role != models.RoleSeller || !user.Verified || !user.IsActive() {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Seller not found"})
 		return
 	}
@@ -636,6 +1049,20 @@ func (api *API) UpdateProduct(c *gin.Context) {
 	product.Available = payload.Available
 	product.Stock = payload.Stock
 	product.Description = payload.Description
+	expectedStock := existing.Stock
+	product.ExpectedStock = &expectedStock
+	if product.Price != existing.Price || product.Stock != existing.Stock {
+		change := models.ProductChange{ActorID: userID, ChangedAt: time.Now().UTC().Format(time.RFC3339)}
+		if product.Price != existing.Price {
+			previousPrice, newPrice := existing.Price, product.Price
+			change.PreviousPrice, change.NewPrice = &previousPrice, &newPrice
+		}
+		if product.Stock != existing.Stock {
+			previousStock, newStock := existing.Stock, product.Stock
+			change.PreviousStock, change.NewStock = &previousStock, &newStock
+		}
+		product.Change = &change
+	}
 	if err := api.Catalog.UpdateProduct(c.Request.Context(), product); err != nil {
 		writeError(c, err)
 		return
@@ -685,7 +1112,7 @@ func publicUser(user models.User) models.User {
 func sellerProfile(user models.User) gin.H {
 	return gin.H{
 		"id": user.ID, "name": user.Name, "villageId": user.VillageID,
-		"verified": user.Verified,
+		"verified": user.Verified, "rating": user.Rating, "ratingCount": user.RatingCount,
 	}
 }
 

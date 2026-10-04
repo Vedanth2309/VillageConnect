@@ -76,12 +76,20 @@ func New(api *handlers.API, databaseStatus func() string, frontendURL string) *g
 	sellerOrders.GET("", api.SellerOrders)
 	sellerOrders.GET("/:id", api.SellerOrder)
 	sellerOrders.PATCH("/:id/status", api.UpdateOrderStatus)
+	apiGroup.POST("/seller/verification-request", requireAuth, api.RequestSellerVerification)
+
+	notifications := apiGroup.Group("/notifications", requireAuth,
+		middleware.RequireRoles(string(models.RoleCustomer), string(models.RoleSeller), string(models.RoleDeliveryAgent), string(models.RoleAdmin)))
+	notifications.GET("", api.ListNotifications)
+	notifications.GET("/unread-count", api.UnreadNotificationCount)
+	notifications.PATCH("/:id/read", api.MarkNotificationRead)
 
 	orders := apiGroup.Group("/orders")
 	orders.Use(requireAuth)
 	orders.GET("", middleware.RequireRoles(string(models.RoleCustomer), string(models.RoleSeller), string(models.RoleAdmin)), api.ListOrders)
 	orders.GET("/:id", middleware.RequireRoles(string(models.RoleCustomer), string(models.RoleSeller), string(models.RoleAdmin)), api.GetOrder)
 	orders.GET("/:id/tracking", middleware.RequireCustomer(), api.GetOrderTracking)
+	orders.GET("/:id/reviews", middleware.RequireCustomer(), api.OrderReviews)
 	orders.POST("", middleware.RequireRoles(string(models.RoleCustomer)), api.CreateOrder)
 	orders.PATCH("/:id/status", middleware.RequireRoles(string(models.RoleCustomer), string(models.RoleSeller),
 		string(models.RoleDeliveryAgent), string(models.RoleAdmin)), api.UpdateOrderStatus)
@@ -97,6 +105,22 @@ func New(api *handlers.API, databaseStatus func() string, frontendURL string) *g
 
 	admin := apiGroup.Group("/admin", requireAuth, middleware.RequireAdmin())
 	admin.GET("/users", api.ListUsers)
+	admin.PATCH("/users/:id/active", api.AdminSetUserActive)
+	admin.GET("/sellers", api.AdminSellers)
+	admin.PATCH("/sellers/:id/status", api.AdminSetSellerStatus)
+	admin.GET("/agents", api.AdminAgents)
+	admin.PATCH("/agents/:id/active", api.AdminSetAgentActive)
+	admin.GET("/villages", api.AdminVillages)
+	admin.POST("/villages", api.AdminCreateVillage)
+	admin.PUT("/villages/:id", api.AdminUpdateVillage)
+	admin.PATCH("/villages/:id/active", api.AdminSetVillageActive)
+	admin.GET("/categories", api.AdminCategories)
+	admin.POST("/categories", api.AdminCreateCategory)
+	admin.PUT("/categories/:id", api.AdminUpdateCategory)
+	admin.PATCH("/categories/:id/active", api.AdminSetCategoryActive)
+	admin.GET("/products", api.AdminProducts)
+	admin.PATCH("/products/:id/availability", api.AdminSetProductAvailability)
+	admin.GET("/orders", api.AdminOrders)
 	admin.GET("/analytics", api.AdminAnalytics)
 	admin.POST("/search/reindex", api.ReindexSearch)
 	apiGroup.GET("/users", requireAuth, middleware.RequireAdmin(), api.ListUsers)
@@ -114,9 +138,10 @@ func New(api *handlers.API, databaseStatus func() string, frontendURL string) *g
 	payments.GET("/:id", handlers.NotImplemented("Payments"))
 
 	reviews := apiGroup.Group("/reviews")
-	reviews.GET("", handlers.NotImplemented("Reviews"))
-	reviews.GET("/products/:productId", handlers.NotImplemented("Reviews"))
-	reviews.POST("", requireAuth, middleware.RequireCustomer(), handlers.NotImplemented("Reviews"))
+	reviews.GET("", api.ListReviews)
+	reviews.GET("/products/:productId", api.ProductReviews)
+	reviews.GET("/sellers/:sellerId", api.SellerReviews)
+	reviews.POST("", requireAuth, middleware.RequireCustomer(), api.CreateReview)
 
 	return router
 }

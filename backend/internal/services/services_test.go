@@ -10,13 +10,14 @@ import (
 
 type serviceTestRepository struct {
 	repository.Repository
-	users      map[string]models.User
-	products   map[string]models.Product
-	order      *models.Order
-	cart       *models.Cart
-	villages   []models.Village
-	query      models.ProductQuery
-	deliveries []models.DeliveryAssignment
+	users         map[string]models.User
+	products      map[string]models.Product
+	order         *models.Order
+	cart          *models.Cart
+	villages      []models.Village
+	query         models.ProductQuery
+	deliveries    []models.DeliveryAssignment
+	notifications []models.Notification
 }
 
 func (r *serviceTestRepository) GetUserByEmailForAuth(_ context.Context, email string) (*models.User, error) {
@@ -124,6 +125,37 @@ func (r *serviceTestRepository) CheckoutOrder(_ context.Context, order models.Or
 func (r *serviceTestRepository) ListOrderPayments(context.Context) ([]models.Payment, error) {
 	return nil, nil
 }
+func (r *serviceTestRepository) CreateNotification(_ context.Context, notification models.Notification) error {
+	r.notifications = append(r.notifications, notification)
+	return nil
+}
+func (r *serviceTestRepository) ListNotifications(_ context.Context, userID string, limit int) ([]models.Notification, error) {
+	result := make([]models.Notification, 0)
+	for i := len(r.notifications) - 1; i >= 0 && len(result) < limit; i-- {
+		if r.notifications[i].UserID == userID {
+			result = append(result, r.notifications[i])
+		}
+	}
+	return result, nil
+}
+func (r *serviceTestRepository) CountUnreadNotifications(_ context.Context, userID string) (int64, error) {
+	var count int64
+	for _, notification := range r.notifications {
+		if notification.UserID == userID && !notification.Read {
+			count++
+		}
+	}
+	return count, nil
+}
+func (r *serviceTestRepository) MarkNotificationRead(_ context.Context, userID, notificationID string) error {
+	for i := range r.notifications {
+		if r.notifications[i].UserID == userID && r.notifications[i].ID == notificationID {
+			r.notifications[i].Read = true
+			return nil
+		}
+	}
+	return repository.ErrNotFound
+}
 func (r *serviceTestRepository) TransitionOrder(_ context.Context, id string, from, to models.OrderStatus, actorID string,
 	event models.OrderStatusEvent) (*models.Order, error) {
 	if r.order == nil || r.order.ID != id || r.order.Status != from {
@@ -189,6 +221,9 @@ func TestCreateOrderUsesCatalogPricesAndValidatesStock(t *testing.T) {
 		repo.order.Items[0].Price != 38 || repo.order.Items[0].Name != "Tomato" ||
 		created.SellerID != "seller-1" || created.Total != 101 || created.Payment.Status != "paid" {
 		t.Fatalf("order was not calculated from catalog: %+v", repo.order)
+	}
+	if len(repo.notifications) != 2 || repo.notifications[0].Type != "new_order" || repo.notifications[1].Type != "low_stock" {
+		t.Fatalf("checkout notifications = %+v, want seller new-order and low-stock alerts", repo.notifications)
 	}
 
 	repo.cart = &models.Cart{CustomerID: "customer-1", VillageID: "village-1", SellerID: "seller-1",

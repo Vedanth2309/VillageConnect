@@ -38,6 +38,10 @@ func (r *searchTestRepository) ListVillages(context.Context) ([]models.Village, 
 	return []models.Village{{ID: "v1", Name: "Kudlu"}}, nil
 }
 
+func (r *searchTestRepository) ListCategories(context.Context) ([]models.Category, error) {
+	return []models.Category{{ID: "c1", Name: "Vegetables"}, {ID: "c3", Name: "Grains"}}, nil
+}
+
 func (r *searchTestRepository) ListProducts(context.Context) ([]models.Product, error) {
 	if r.product.ID == "" {
 		r.product = models.Product{ID: "p1", Name: "Tomato"}

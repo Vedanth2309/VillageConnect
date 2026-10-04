@@ -106,8 +106,15 @@ CORS_ALLOWED_ORIGINS=http://localhost:9091,http://127.0.0.1:9091
 | POST, GET | `/api/payments`, `/api/payments/:id` | Customer; external payment endpoints return `501` (simulated payments are created at checkout) |
 | GET, POST, PATCH | `/api/deliveries`, `/api/deliveries/:id`, `/api/deliveries/:id/status` | Admin or assigned delivery agent; in-transit/delivered updates also advance the order lifecycle |
 | GET | `/api/agents/:agentId/deliveries` | Own agent account or admin |
-| GET | `/api/admin/users`, `/api/admin/analytics`, `/api/users` | Admin |
-| GET, POST | `/api/reviews`, `/api/reviews/products/:productId` | Public read/customer write; currently returns `501` |
+| GET | `/api/admin/users`, `/api/admin/sellers`, `/api/admin/agents`, `/api/admin/villages`, `/api/admin/categories`, `/api/admin/products`, `/api/admin/orders`, `/api/admin/analytics` | Admin |
+| PATCH | `/api/admin/users/:id/active`, `/api/admin/agents/:id/active`, `/api/admin/sellers/:id/status`, `/api/admin/products/:id/availability` | Admin |
+| POST, PUT, PATCH | `/api/admin/villages`, `/api/admin/categories` and their `/:id` management paths | Admin |
+| GET, PATCH | `/api/notifications`, `/api/notifications/unread-count`, `/api/notifications/:id/read` | Authenticated; only own notifications |
+| POST | `/api/seller/verification-request` | Authenticated seller |
+| GET | `/api/users` | Admin |
+| GET | `/api/reviews?productId=:id`, `/api/reviews/products/:productId`, `/api/reviews/sellers/:sellerId` | Public product and seller reviews |
+| GET | `/api/orders/:id/reviews` | Customer's own order review state |
+| POST | `/api/reviews` | Customer; only delivered products from an owned order; one review per order item |
 
 ## Backend structure
 
@@ -121,15 +128,15 @@ The Go API is organized by responsibility:
 - `internal/search`: product-search service boundary
 - `internal/auth`, `internal/models`, and `internal/config`: session tokens, data models, and runtime configuration
 
-The current route groups are `/api/auth`, `/api/users`, `/api/villages`, `/api/categories`, `/api/products`, `/api/search`, `/api/sellers`, `/api/seller/orders`, `/api/cart`, `/api/orders`, `/api/deliveries`, `/api/agents`, and `/api/admin`. Payments are simulated at checkout and persisted both as a separate payment record and an order snapshot; external payment query endpoints and reviews remain explicitly protected `501 Not Implemented` routes.
+The current route groups are `/api/auth`, `/api/users`, `/api/villages`, `/api/categories`, `/api/products`, `/api/search`, `/api/sellers`, `/api/seller/orders`, `/api/seller/verification-request`, `/api/cart`, `/api/orders`, `/api/deliveries`, `/api/agents`, `/api/notifications`, `/api/reviews`, and `/api/admin`. Payments are simulated at checkout and persisted both as a separate payment record and an order snapshot; external payment query endpoints remain explicitly protected `501 Not Implemented` routes.
 
-Cart lines persist in MongoDB by customer. Checkout ignores client-supplied item names, prices, and totals, re-reads product/seller/village state, recalculates subtotal and fees, conditionally reserves stock without allowing negative inventory, and creates an order plus its payment record. If order/payment/cart persistence fails, prior stock reservations are compensated. Delivery currently uses a fixed INR 25 fee; pickup has no delivery fee. Checkout supports one seller and one serviceable village per cart to match the existing order model. Seller verification is the current active/eligible signal because the existing user schema has no separate seller-active field.
+Cart lines persist in MongoDB by customer. Checkout ignores client-supplied item names, prices, and totals, re-reads product/seller/village state, recalculates subtotal and fees, conditionally reserves stock without allowing negative inventory, and creates an order plus its payment record. If order/payment/cart persistence fails, prior stock reservations are compensated. Delivery currently uses a fixed INR 25 fee; pickup has no delivery fee. Checkout supports one seller and one serviceable village per cart to match the existing order model. Sellers must be verified and active; missing active fields on legacy records mean active.
 
-Orders follow `pending → confirmed → preparing → packed → ready_for_pickup → out_for_delivery → delivered`, with terminal `cancelled` and `rejected` outcomes. Seller actions are restricted to their own orders, delivery agents must be assigned, customer cancellation is allowed through confirmation, and every transition is validated and recorded in the order's status history. Conditional MongoDB stock updates ensure competing orders cannot oversell a product; a checkout contention test covers one customer requesting 4 from stock 5 while another requests 3.
+Orders follow `pending → confirmed → preparing → packed → ready_for_pickup → out_for_delivery → delivered`, with terminal `cancelled` and `rejected` outcomes. Seller actions are restricted to their own orders, delivery agents must be assigned, customer cancellation is allowed through confirmation, and every transition is validated and recorded in the order's status history. Conditional MongoDB stock updates ensure competing orders cannot oversell a product; a checkout contention test covers one customer requesting 4 from stock 5 while another requests 3. Admin analytics use MongoDB aggregations; the index/query and inventory consistency examples are documented in [docs/DBMS_DEMONSTRATION.md](./docs/DBMS_DEMONSTRATION.md).
 
 For compatibility with databases seeded by earlier versions, startup only backfills `sellerId` on the exact bundled sample products when their original sample seller name still matches, and inserts the corresponding sample seller account only when absent. Other product and user records are not modified by this transition.
 
-Private routes require `Authorization: Bearer <token>`. Admin routes require an admin role; sellers can manage their own listings and orders; customers can access their own orders; and delivery agents can access only their assigned deliveries. Public registration creates customer accounts only.
+Private routes require `Authorization: Bearer <token>`. Admin routes require an admin role; sellers can manage their own listings and orders; customers can access their own orders; and delivery agents can access only their assigned deliveries. Notifications are stored in MongoDB and are readable only by their recipient. Public registration creates customer accounts only.
 
 The precise method-by-method access classification and ownership rules are in [docs/AUTHORIZATION.md](./docs/AUTHORIZATION.md). Elevated roles must be provisioned through a trusted administrative process; self-service registration cannot assign them.
 

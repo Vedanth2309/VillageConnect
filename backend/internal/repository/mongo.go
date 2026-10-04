@@ -27,8 +27,12 @@ type Store struct {
 	mongoURI      string
 	collectionMap map[string]string
 	users         []models.User
+	villages      []models.Village
+	categories    []models.Category
 	products      []models.Product
 	orders        []models.Order
+	reviews       []models.Review
+	notifications []models.Notification
 	payments      []models.Payment
 	deliveries    []models.DeliveryAssignment
 	carts         map[string]models.Cart
@@ -52,6 +56,8 @@ func NewStore(ctx context.Context, cfg config.Config) (*Store, error) {
 			"carts":      "carts",
 		},
 		users:      append([]models.User{}, models.DefaultUsers...),
+		villages:   append([]models.Village{}, models.DefaultVillages...),
+		categories: append([]models.Category{}, models.DefaultCategories...),
 		products:   append([]models.Product{}, models.DefaultProducts...),
 		orders:     append([]models.Order{}, models.DefaultOrders...),
 		deliveries: append([]models.DeliveryAssignment{}, models.DefaultDeliveries...),
@@ -115,6 +121,13 @@ func (s *Store) ensureAuthIndexes(ctx context.Context) error {
 		Keys:    bson.D{{Key: "expiresAt", Value: 1}},
 		Options: options.Index().SetExpireAfterSeconds(0).SetName("auth_sessions_expiry"),
 	})
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.Collection("notifications").Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "userId", Value: 1}, {Key: "read", Value: 1}, {Key: "createdAt", Value: -1}},
+		Options: options.Index().SetName("notifications_user_unread_created"),
+	})
 	return err
 }
 
@@ -154,6 +167,10 @@ func (s *Store) ensureMarketplaceIndexes(ctx context.Context) error {
 		collection string
 		model      mongo.IndexModel
 	}{
+		{collection: "users", model: mongo.IndexModel{
+			Keys:    bson.D{{Key: "role", Value: 1}},
+			Options: options.Index().SetName("users_role"),
+		}},
 		{collection: "orders", model: mongo.IndexModel{
 			Keys:    bson.D{{Key: "customerId", Value: 1}, {Key: "createdAt", Value: -1}},
 			Options: options.Index().SetName("orders_customer_created"),
@@ -161,6 +178,22 @@ func (s *Store) ensureMarketplaceIndexes(ctx context.Context) error {
 		{collection: "orders", model: mongo.IndexModel{
 			Keys:    bson.D{{Key: "sellerId", Value: 1}, {Key: "createdAt", Value: -1}},
 			Options: options.Index().SetName("orders_seller_created"),
+		}},
+		{collection: "orders", model: mongo.IndexModel{
+			Keys:    bson.D{{Key: "status", Value: 1}, {Key: "createdAt", Value: -1}},
+			Options: options.Index().SetName("orders_status_created"),
+		}},
+		{collection: "orders", model: mongo.IndexModel{
+			Keys:    bson.D{{Key: "status", Value: 1}, {Key: "items.productId", Value: 1}},
+			Options: options.Index().SetName("orders_status_item_product"),
+		}},
+		{collection: "products", model: mongo.IndexModel{
+			Keys:    bson.D{{Key: "stock", Value: 1}, {Key: "available", Value: 1}},
+			Options: options.Index().SetName("products_stock_availability"),
+		}},
+		{collection: "products", model: mongo.IndexModel{
+			Keys:    bson.D{{Key: "sellerId", Value: 1}, {Key: "name", Value: 1}},
+			Options: options.Index().SetName("products_seller_name"),
 		}},
 		{collection: "payments", model: mongo.IndexModel{
 			Keys:    bson.D{{Key: "orderId", Value: 1}},
@@ -170,6 +203,12 @@ func (s *Store) ensureMarketplaceIndexes(ctx context.Context) error {
 		if _, err := s.DB.Collection(index.collection).Indexes().CreateOne(ctx, index.model); err != nil {
 			return err
 		}
+	}
+	if _, err := s.DB.Collection("reviews").Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "orderId", Value: 1}, {Key: "productId", Value: 1}},
+		Options: options.Index().SetUnique(true).SetName("reviews_order_product_unique"),
+	}); err != nil {
+		return err
 	}
 	return nil
 }
@@ -190,7 +229,7 @@ func (s *Store) migrateLegacyOrderStatuses(ctx context.Context) error {
 
 func (s *Store) ListVillages(ctx context.Context) ([]models.Village, error) {
 	if s.DB == nil || s.Fallback {
-		return models.DefaultVillages, nil
+		return append([]models.Village(nil), s.villages...), nil
 	}
 
 	cursor, err := s.DB.Collection("villages").Find(ctx, bson.M{})
@@ -208,7 +247,7 @@ func (s *Store) ListVillages(ctx context.Context) ([]models.Village, error) {
 
 func (s *Store) ListCategories(ctx context.Context) ([]models.Category, error) {
 	if s.DB == nil || s.Fallback {
-		return models.DefaultCategories, nil
+		return append([]models.Category(nil), s.categories...), nil
 	}
 
 	cursor, err := s.DB.Collection("categories").Find(ctx, bson.M{})
@@ -222,6 +261,112 @@ func (s *Store) ListCategories(ctx context.Context) ([]models.Category, error) {
 		return nil, err
 	}
 	return categories, nil
+}
+
+func (s *Store) CreateVillage(ctx context.Context, village models.Village) error {
+	if s.DB == nil || s.Fallback {
+		for _, existing := range s.villages {
+			if existing.ID == village.ID || (strings.EqualFold(existing.Name, village.Name) &&
+				strings.EqualFold(existing.District, village.District) && strings.EqualFold(existing.State, village.State)) {
+				return ErrConflict
+			}
+		}
+		s.villages = append(s.villages, village)
+		return nil
+	}
+	_, err := s.DB.Collection("villages").InsertOne(ctx, village)
+	return mongoError(err)
+}
+
+func (s *Store) UpdateVillage(ctx context.Context, village models.Village) error {
+	if s.DB == nil || s.Fallback {
+		for i, existing := range s.villages {
+			if existing.ID == village.ID {
+				s.villages[i] = village
+				return nil
+			}
+		}
+		return ErrNotFound
+	}
+	result, err := s.DB.Collection("villages").ReplaceOne(ctx, bson.M{"_id": village.ID}, village)
+	if err != nil {
+		return mongoError(err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) SetVillageActive(ctx context.Context, id string, active bool) error {
+	if s.DB == nil || s.Fallback {
+		for i := range s.villages {
+			if s.villages[i].ID == id {
+				s.villages[i].Active = &active
+				return nil
+			}
+		}
+		return ErrNotFound
+	}
+	return updateActiveField(ctx, s.DB.Collection("villages"), id, active)
+}
+
+func (s *Store) CreateCategory(ctx context.Context, category models.Category) error {
+	if s.DB == nil || s.Fallback {
+		for _, existing := range s.categories {
+			if existing.ID == category.ID || strings.EqualFold(existing.Name, category.Name) {
+				return ErrConflict
+			}
+		}
+		s.categories = append(s.categories, category)
+		return nil
+	}
+	_, err := s.DB.Collection("categories").InsertOne(ctx, category)
+	return mongoError(err)
+}
+
+func (s *Store) UpdateCategory(ctx context.Context, category models.Category) error {
+	if s.DB == nil || s.Fallback {
+		for i, existing := range s.categories {
+			if existing.ID == category.ID {
+				s.categories[i] = category
+				return nil
+			}
+		}
+		return ErrNotFound
+	}
+	result, err := s.DB.Collection("categories").ReplaceOne(ctx, bson.M{"_id": category.ID}, category)
+	if err != nil {
+		return mongoError(err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) SetCategoryActive(ctx context.Context, id string, active bool) error {
+	if s.DB == nil || s.Fallback {
+		for i := range s.categories {
+			if s.categories[i].ID == id {
+				s.categories[i].Active = &active
+				return nil
+			}
+		}
+		return ErrNotFound
+	}
+	return updateActiveField(ctx, s.DB.Collection("categories"), id, active)
+}
+
+func updateActiveField(ctx context.Context, collection *mongo.Collection, id string, active bool) error {
+	result, err := collection.UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"active": active}})
+	if err != nil {
+		return mongoError(err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) ListProducts(ctx context.Context) ([]models.Product, error) {
@@ -561,6 +706,43 @@ func (s *Store) CreateUser(ctx context.Context, user models.User) error {
 	return mongoError(err)
 }
 
+func (s *Store) SetUserActive(ctx context.Context, id string, active bool) error {
+	if s.DB == nil || s.Fallback {
+		for i := range s.users {
+			if s.users[i].ID == id {
+				s.users[i].Active = &active
+				return nil
+			}
+		}
+		return ErrNotFound
+	}
+	return updateActiveField(ctx, s.DB.Collection("users"), id, active)
+}
+
+func (s *Store) SetSellerState(ctx context.Context, id, status string, verified, active bool) error {
+	if s.DB == nil || s.Fallback {
+		for i := range s.users {
+			if s.users[i].ID == id && s.users[i].Role == models.RoleSeller {
+				s.users[i].SellerStatus = status
+				s.users[i].Verified = verified
+				s.users[i].Active = &active
+				return nil
+			}
+		}
+		return ErrNotFound
+	}
+	result, err := s.DB.Collection("users").UpdateOne(ctx,
+		bson.M{"_id": id, "role": models.RoleSeller},
+		bson.M{"$set": bson.M{"sellerStatus": status, "verified": verified, "active": active}})
+	if err != nil {
+		return mongoError(err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) CreateSession(ctx context.Context, session models.AuthSession) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -672,6 +854,246 @@ func (s *Store) GetOrderByID(ctx context.Context, id string) (*models.Order, err
 		return nil, mongoError(err)
 	}
 	return &order, nil
+}
+
+func (s *Store) ListReviewsByOrder(ctx context.Context, orderID string) ([]models.Review, error) {
+	return s.listReviews(ctx, bson.M{"orderId": orderID}, func() []models.Review {
+		result := make([]models.Review, 0)
+		for _, review := range s.reviews {
+			if review.OrderID == orderID {
+				result = append(result, review)
+			}
+		}
+		return result
+	})
+}
+
+func (s *Store) ListReviewsByProduct(ctx context.Context, productID string) ([]models.Review, error) {
+	return s.listReviews(ctx, bson.M{"productId": productID}, func() []models.Review {
+		result := make([]models.Review, 0)
+		for _, review := range s.reviews {
+			if review.ProductID == productID {
+				result = append(result, review)
+			}
+		}
+		return result
+	})
+}
+
+func (s *Store) ListReviewsBySeller(ctx context.Context, sellerID string) ([]models.Review, error) {
+	return s.listReviews(ctx, bson.M{"sellerId": sellerID}, func() []models.Review {
+		result := make([]models.Review, 0)
+		for _, review := range s.reviews {
+			if review.SellerID == sellerID {
+				result = append(result, review)
+			}
+		}
+		return result
+	})
+}
+
+func (s *Store) listReviews(ctx context.Context, filter bson.M, fallback func() []models.Review) ([]models.Review, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s.DB == nil || s.Fallback {
+		s.cartMu.Lock()
+		defer s.cartMu.Unlock()
+		return fallback(), nil
+	}
+	cursor, err := s.DB.Collection("reviews").Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}).SetLimit(100))
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+	reviews := make([]models.Review, 0)
+	if err := cursor.All(ctx, &reviews); err != nil {
+		return nil, err
+	}
+	return reviews, nil
+}
+
+func (s *Store) CreateReview(ctx context.Context, review models.Review) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.DB == nil || s.Fallback {
+		s.cartMu.Lock()
+		defer s.cartMu.Unlock()
+		for _, existing := range s.reviews {
+			if existing.OrderID == review.OrderID && existing.ProductID == review.ProductID {
+				return ErrConflict
+			}
+		}
+		s.reviews = append(s.reviews, review)
+		s.refreshFallbackRatings(review.ProductID, review.SellerID)
+		return nil
+	}
+	if _, err := s.DB.Collection("reviews").InsertOne(ctx, review); err != nil {
+		return mongoError(err)
+	}
+	productRating, productCount, err := s.averageReviewRating(ctx, "productId", review.ProductID, "productRating")
+	if err != nil {
+		return err
+	}
+	if _, err := s.DB.Collection("products").UpdateOne(ctx, bson.M{"_id": review.ProductID},
+		bson.M{"$set": bson.M{"rating": productRating, "ratingCount": productCount}}); err != nil {
+		return err
+	}
+	sellerRating, sellerCount, err := s.averageReviewRating(ctx, "sellerId", review.SellerID, "sellerRating")
+	if err != nil {
+		return err
+	}
+	if _, err := s.DB.Collection("users").UpdateOne(ctx, bson.M{"_id": review.SellerID},
+		bson.M{"$set": bson.M{"rating": sellerRating, "ratingCount": sellerCount}}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) averageReviewRating(ctx context.Context, key, id, ratingField string) (float64, int, error) {
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{key: id}}},
+		{{Key: "$group", Value: bson.M{"_id": nil, "average": bson.M{"$avg": "$" + ratingField}, "count": bson.M{"$sum": 1}}}},
+	}
+	cursor, err := s.DB.Collection("reviews").Aggregate(ctx, pipeline)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer cursor.Close(ctx)
+	var result []struct {
+		Average float64 `bson:"average"`
+		Count   int     `bson:"count"`
+	}
+	if err := cursor.All(ctx, &result); err != nil {
+		return 0, 0, err
+	}
+	if len(result) == 0 {
+		return 0, 0, nil
+	}
+	return result[0].Average, result[0].Count, nil
+}
+
+func (s *Store) refreshFallbackRatings(productID, sellerID string) {
+	productTotal, productCount := 0, 0
+	sellerTotal, sellerCount := 0, 0
+	for _, review := range s.reviews {
+		if review.ProductID == productID {
+			productTotal += review.ProductRating
+			productCount++
+		}
+		if review.SellerID == sellerID {
+			sellerTotal += review.SellerRating
+			sellerCount++
+		}
+	}
+	for i := range s.products {
+		if s.products[i].ID == productID && productCount > 0 {
+			s.products[i].Rating = float64(productTotal) / float64(productCount)
+			s.products[i].RatingCount = productCount
+		}
+	}
+	for i := range s.users {
+		if s.users[i].ID == sellerID && sellerCount > 0 {
+			s.users[i].Rating = float64(sellerTotal) / float64(sellerCount)
+			s.users[i].RatingCount = sellerCount
+		}
+	}
+}
+
+func (s *Store) CreateNotification(ctx context.Context, notification models.Notification) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.DB == nil || s.Fallback {
+		s.cartMu.Lock()
+		defer s.cartMu.Unlock()
+		s.notifications = append(s.notifications, notification)
+		return nil
+	}
+	_, err := s.DB.Collection("notifications").InsertOne(ctx, notification)
+	return mongoError(err)
+}
+
+func (s *Store) ListNotifications(ctx context.Context, userID string, limit int) ([]models.Notification, error) {
+	if userID == "" || limit < 1 || limit > 100 {
+		return nil, ErrConflict
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s.DB == nil || s.Fallback {
+		s.cartMu.Lock()
+		defer s.cartMu.Unlock()
+		result := make([]models.Notification, 0)
+		for i := len(s.notifications) - 1; i >= 0 && len(result) < limit; i-- {
+			if s.notifications[i].UserID == userID {
+				result = append(result, s.notifications[i])
+			}
+		}
+		return result, nil
+	}
+	cursor, err := s.DB.Collection("notifications").Find(ctx, bson.M{"userId": userID},
+		options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}).SetLimit(int64(limit)))
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+	result := make([]models.Notification, 0)
+	if err := cursor.All(ctx, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *Store) CountUnreadNotifications(ctx context.Context, userID string) (int64, error) {
+	if userID == "" {
+		return 0, ErrConflict
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if s.DB == nil || s.Fallback {
+		s.cartMu.Lock()
+		defer s.cartMu.Unlock()
+		var count int64
+		for _, notification := range s.notifications {
+			if notification.UserID == userID && !notification.Read {
+				count++
+			}
+		}
+		return count, nil
+	}
+	return s.DB.Collection("notifications").CountDocuments(ctx, bson.M{"userId": userID, "read": false})
+}
+
+func (s *Store) MarkNotificationRead(ctx context.Context, userID, notificationID string) error {
+	if userID == "" || notificationID == "" {
+		return ErrNotFound
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.DB == nil || s.Fallback {
+		s.cartMu.Lock()
+		defer s.cartMu.Unlock()
+		for i := range s.notifications {
+			if s.notifications[i].ID == notificationID && s.notifications[i].UserID == userID {
+				s.notifications[i].Read = true
+				return nil
+			}
+		}
+		return ErrNotFound
+	}
+	result, err := s.DB.Collection("notifications").UpdateOne(ctx,
+		bson.M{"_id": notificationID, "userId": userID}, bson.M{"$set": bson.M{"read": true}})
+	if err != nil {
+		return mongoError(err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func cloneOrder(order models.Order) models.Order {
@@ -908,7 +1330,10 @@ func (s *Store) TransitionOrder(ctx context.Context, id string, from, to models.
 				for _, item := range order.Items {
 					for productIndex := range s.products {
 						if s.products[productIndex].ID == item.ProductID {
-							s.products[productIndex].Stock += item.Quantity
+							if !containsOrderID(s.products[productIndex].RestockedOrderIDs, order.ID) {
+								s.products[productIndex].Stock += item.Quantity
+								s.products[productIndex].RestockedOrderIDs = append(s.products[productIndex].RestockedOrderIDs, order.ID)
+							}
 							break
 						}
 					}
@@ -941,9 +1366,6 @@ func (s *Store) TransitionOrder(ctx context.Context, id string, from, to models.
 		"$set":  bson.M{"status": to, "updatedAt": now},
 		"$push": bson.M{"statusHistory": event},
 	}
-	if restock {
-		update["$set"].(bson.M)["inventoryRestored"] = true
-	}
 	var order models.Order
 	err = s.DB.Collection("orders").FindOneAndUpdate(ctx, filter, update,
 		options.FindOneAndUpdate().SetReturnDocument(options.After)).Decode(&order)
@@ -957,23 +1379,137 @@ func (s *Store) TransitionOrder(ctx context.Context, id string, from, to models.
 		return nil, mongoError(err)
 	}
 	if restock {
-		for _, item := range order.Items {
-			if _, err := s.DB.Collection("products").UpdateOne(ctx, bson.M{"_id": item.ProductID},
-				bson.M{"$inc": bson.M{"stock": item.Quantity}}); err != nil {
-				return nil, fmt.Errorf("restore stock for cancelled order %s: %w", order.ID, err)
-			}
-		}
-		updateOrderPaymentState(&order, nil)
-		if _, err := s.DB.Collection("orders").UpdateOne(ctx, bson.M{"_id": order.ID},
-			bson.M{"$set": bson.M{"payment.status": order.Payment.Status}}); err != nil {
-			return nil, fmt.Errorf("update payment state for cancelled order %s: %w", order.ID, err)
-		}
-		if _, err := s.DB.Collection("payments").UpdateOne(ctx, bson.M{"_id": order.PaymentID},
-			bson.M{"$set": bson.M{"status": order.Payment.Status, "updatedAt": now}}); err != nil {
-			return nil, fmt.Errorf("update payment record for cancelled order %s: %w", order.ID, err)
-		}
+		return s.RestoreOrderInventory(ctx, order.ID)
 	}
 	return &order, nil
+}
+
+func (s *Store) RestoreOrderInventory(ctx context.Context, id string) (*models.Order, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s.DB == nil || s.Fallback {
+		s.cartMu.Lock()
+		defer s.cartMu.Unlock()
+		for orderIndex := range s.orders {
+			order := &s.orders[orderIndex]
+			if order.ID != id {
+				continue
+			}
+			if order.InventoryRestored {
+				clearFallbackRestockMarkers(s.products, order)
+				clone := cloneOrder(*order)
+				return &clone, nil
+			}
+			if !order.InventoryReserved || (order.Status != models.OrderCancelled && order.Status != models.OrderRejected) {
+				return nil, ErrConflict
+			}
+			for _, item := range order.Items {
+				for productIndex := range s.products {
+					product := &s.products[productIndex]
+					if product.ID == item.ProductID && !containsOrderID(product.RestockedOrderIDs, order.ID) {
+						product.Stock += item.Quantity
+						product.RestockedOrderIDs = append(product.RestockedOrderIDs, order.ID)
+						break
+					}
+				}
+			}
+			order.InventoryRestored = true
+			updateOrderPaymentState(order, &s.payments)
+			clearFallbackRestockMarkers(s.products, order)
+			clone := cloneOrder(*order)
+			return &clone, nil
+		}
+		return nil, ErrNotFound
+	}
+
+	order, err := s.GetOrderByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if order.InventoryRestored {
+		return order, nil
+	}
+	if !order.InventoryReserved || (order.Status != models.OrderCancelled && order.Status != models.OrderRejected) {
+		return nil, ErrConflict
+	}
+	for _, item := range order.Items {
+		result, updateErr := s.DB.Collection("products").UpdateOne(ctx,
+			bson.M{"_id": item.ProductID, "restockedOrderIds": bson.M{"$ne": order.ID}},
+			bson.M{"$inc": bson.M{"stock": item.Quantity}, "$addToSet": bson.M{"restockedOrderIds": order.ID}})
+		if updateErr != nil {
+			return nil, fmt.Errorf("restore stock for order %s product %s: %w", order.ID, item.ProductID, updateErr)
+		}
+		if result.MatchedCount == 0 {
+			if _, lookupErr := s.GetProductByID(ctx, item.ProductID); lookupErr != nil && !errors.Is(lookupErr, ErrNotFound) {
+				return nil, lookupErr
+			}
+		}
+	}
+
+	updateOrderPaymentState(order, nil)
+	if _, err := s.DB.Collection("payments").UpdateOne(ctx, bson.M{"_id": order.PaymentID},
+		bson.M{"$set": bson.M{"status": order.Payment.Status, "updatedAt": time.Now().UTC().Format(time.RFC3339)}}); err != nil {
+		return nil, fmt.Errorf("update payment record for order %s: %w", order.ID, err)
+	}
+	result, err := s.DB.Collection("orders").UpdateOne(ctx,
+		bson.M{"_id": order.ID, "status": order.Status, "inventoryRestored": bson.M{"$ne": true}},
+		bson.M{"$set": bson.M{"inventoryRestored": true, "payment.status": order.Payment.Status}})
+	if err != nil {
+		return nil, fmt.Errorf("mark inventory restored for order %s: %w", order.ID, err)
+	}
+	if result.MatchedCount == 0 {
+		current, lookupErr := s.GetOrderByID(ctx, id)
+		if lookupErr != nil {
+			return nil, lookupErr
+		}
+		if current.InventoryRestored {
+			if cleanupErr := s.clearMongoRestockMarkers(ctx, *current); cleanupErr != nil {
+				log.Printf("stock restoration completed but marker cleanup failed: %v", cleanupErr)
+			}
+			return current, nil
+		}
+		return nil, ErrConflict
+	}
+	order.InventoryRestored = true
+	if err := s.clearMongoRestockMarkers(ctx, *order); err != nil {
+		log.Printf("stock restoration completed but marker cleanup failed: %v", err)
+	}
+	return order, nil
+}
+
+func (s *Store) clearMongoRestockMarkers(ctx context.Context, order models.Order) error {
+	for _, item := range order.Items {
+		if _, err := s.DB.Collection("products").UpdateOne(ctx, bson.M{"_id": item.ProductID},
+			bson.M{"$pull": bson.M{"restockedOrderIds": order.ID}}); err != nil {
+			return fmt.Errorf("clear stock restoration marker for order %s product %s: %w", order.ID, item.ProductID, err)
+		}
+	}
+	return nil
+}
+
+func clearFallbackRestockMarkers(products []models.Product, order *models.Order) {
+	for productIndex := range products {
+		if !containsOrderID(products[productIndex].RestockedOrderIDs, order.ID) {
+			continue
+		}
+		orderIDs := products[productIndex].RestockedOrderIDs[:0]
+		for _, orderID := range products[productIndex].RestockedOrderIDs {
+			if orderID != order.ID {
+				orderIDs = append(orderIDs, orderID)
+			}
+		}
+		products[productIndex].RestockedOrderIDs = orderIDs
+	}
+}
+
+func containsOrderID(orderIDs []string, id string) bool {
+	for _, orderID := range orderIDs {
+		if orderID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func updateOrderPaymentState(order *models.Order, payments *[]models.Payment) {
@@ -1013,15 +1549,67 @@ func (s *Store) CreateProduct(ctx context.Context, product models.Product) error
 
 func (s *Store) UpdateProduct(ctx context.Context, product models.Product) error {
 	if s.DB == nil || s.Fallback {
+		s.cartMu.Lock()
+		defer s.cartMu.Unlock()
 		for i, existing := range s.products {
 			if existing.ID == product.ID {
+				if product.ExpectedStock != nil && existing.Stock != *product.ExpectedStock {
+					return ErrConflict
+				}
+				product.History = append([]models.ProductChange(nil), existing.History...)
+				if product.Change != nil {
+					product.History = append(product.History, *product.Change)
+					if len(product.History) > 100 {
+						product.History = product.History[len(product.History)-100:]
+					}
+				}
+				product.ExpectedStock = nil
+				product.Change = nil
 				s.products[i] = product
 				return nil
 			}
 		}
 		return errors.New("product not found")
 	}
-	result, err := s.DB.Collection("products").ReplaceOne(ctx, bson.M{"_id": product.ID}, product)
+	filter := bson.M{"_id": product.ID}
+	if product.ExpectedStock != nil {
+		filter["stock"] = *product.ExpectedStock
+	}
+	set := bson.M{
+		"name": product.Name, "category": product.Category, "price": product.Price,
+		"rating": product.Rating, "unit": product.Unit, "village": product.Village,
+		"villageId": product.VillageID, "sellerId": product.SellerID, "seller": product.Seller,
+		"available": product.Available, "stock": product.Stock, "description": product.Description,
+	}
+	update := bson.M{"$set": set}
+	if product.Change != nil {
+		update["$push"] = bson.M{"history": bson.M{"$each": []models.ProductChange{*product.Change}, "$slice": -100}}
+	}
+	result, err := s.DB.Collection("products").UpdateOne(ctx, filter, update)
+	if err != nil {
+		return mongoError(err)
+	}
+	if result.MatchedCount == 0 {
+		if _, lookupErr := s.GetProductByID(ctx, product.ID); lookupErr != nil {
+			return lookupErr
+		}
+		return ErrConflict
+	}
+	return nil
+}
+
+func (s *Store) SetProductAvailability(ctx context.Context, id string, available bool) error {
+	if s.DB == nil || s.Fallback {
+		for i := range s.products {
+			if s.products[i].ID == id {
+				s.products[i].Available = available && s.products[i].Stock > 0
+				return nil
+			}
+		}
+		return ErrNotFound
+	}
+	result, err := s.DB.Collection("products").UpdateOne(ctx, bson.M{"_id": id},
+		bson.M{"$set": bson.M{"available": available}})
 	if err != nil {
 		return mongoError(err)
 	}
@@ -1078,6 +1666,161 @@ func (s *Store) ListSellerProducts(ctx context.Context, seller string) ([]models
 }
 
 func (s *Store) GetAnalytics(ctx context.Context) (map[string]interface{}, error) {
+	if s.DB == nil || s.Fallback {
+		return s.fallbackAnalytics(ctx)
+	}
+	users, err := s.DB.Collection("users").CountDocuments(ctx, bson.M{})
+	if err != nil {
+		return nil, err
+	}
+	sellers, err := s.DB.Collection("users").CountDocuments(ctx, bson.M{"role": models.RoleSeller})
+	if err != nil {
+		return nil, err
+	}
+	agents, err := s.DB.Collection("users").CountDocuments(ctx, bson.M{"role": models.RoleDeliveryAgent})
+	if err != nil {
+		return nil, err
+	}
+	products, err := s.DB.Collection("products").CountDocuments(ctx, bson.M{})
+	if err != nil {
+		return nil, err
+	}
+	orders, err := s.DB.Collection("orders").CountDocuments(ctx, bson.M{})
+	if err != nil {
+		return nil, err
+	}
+
+	// Aggregate delivered seller subtotal rather than item totals including delivery fees.
+	revenueRows, err := s.aggregateRows(ctx, "orders", mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"status": models.OrderDelivered}}},
+		{{Key: "$group", Value: bson.M{"_id": nil, "revenue": bson.M{"$sum": "$subtotal"}, "deliveredOrders": bson.M{"$sum": 1}}}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var revenue float64
+	var deliveredOrders int64
+	if len(revenueRows) > 0 {
+		revenue = analyticsFloat(revenueRows[0]["revenue"])
+		deliveredOrders = analyticsInt64(revenueRows[0]["deliveredOrders"])
+	}
+
+	topProducts, err := s.aggregateRows(ctx, "orders", mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"status": models.OrderDelivered}}},
+		{{Key: "$unwind", Value: "$items"}},
+		{{Key: "$group", Value: bson.M{"_id": "$items.productId", "name": bson.M{"$first": "$items.name"}, "unitsSold": bson.M{"$sum": "$items.quantity"}, "revenue": bson.M{"$sum": "$items.lineTotal"}}}},
+		{{Key: "$sort", Value: bson.D{{Key: "unitsSold", Value: -1}}}},
+		{{Key: "$limit", Value: 5}},
+		{{Key: "$project", Value: bson.M{"_id": 0, "productId": "$_id", "name": 1, "unitsSold": 1, "revenue": 1}}},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	salesByVillage, err := s.aggregateRows(ctx, "orders", mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"status": models.OrderDelivered}}},
+		{{Key: "$group", Value: bson.M{"_id": "$villageId", "revenue": bson.M{"$sum": "$subtotal"}, "orders": bson.M{"$sum": 1}}}},
+		{{Key: "$lookup", Value: bson.M{"from": "villages", "localField": "_id", "foreignField": "_id", "as": "village"}}},
+		{{Key: "$unwind", Value: bson.M{"path": "$village", "preserveNullAndEmptyArrays": true}}},
+		{{Key: "$project", Value: bson.M{"_id": 0, "villageId": "$_id", "name": bson.M{"$ifNull": bson.A{"$village.name", "$_id"}}, "revenue": 1, "orders": 1}}},
+		{{Key: "$sort", Value: bson.D{{Key: "revenue", Value: -1}}}},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	salesByCategory, err := s.aggregateRows(ctx, "orders", mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"status": models.OrderDelivered}}},
+		{{Key: "$unwind", Value: "$items"}},
+		{{Key: "$lookup", Value: bson.M{"from": "products", "localField": "items.productId", "foreignField": "_id", "as": "product"}}},
+		{{Key: "$unwind", Value: bson.M{"path": "$product", "preserveNullAndEmptyArrays": true}}},
+		{{Key: "$set", Value: bson.M{"categoryName": bson.M{"$ifNull": bson.A{"$product.category", "Uncategorized"}}}}},
+		{{Key: "$group", Value: bson.M{"_id": "$categoryName", "unitsSold": bson.M{"$sum": "$items.quantity"}, "revenue": bson.M{"$sum": "$items.lineTotal"}}}},
+		{{Key: "$project", Value: bson.M{"_id": 0, "category": "$_id", "unitsSold": 1, "revenue": 1}}},
+		{{Key: "$sort", Value: bson.D{{Key: "revenue", Value: -1}}}},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	lowStockProducts := make([]models.Product, 0)
+	cursor, err := s.DB.Collection("products").Find(ctx, bson.M{"stock": bson.M{"$lte": 5}},
+		options.Find().SetSort(bson.D{{Key: "stock", Value: 1}, {Key: "name", Value: 1}}).SetLimit(10))
+	if err != nil {
+		return nil, err
+	}
+	if err := cursor.All(ctx, &lowStockProducts); err != nil {
+		cursor.Close(ctx)
+		return nil, err
+	}
+	cursor.Close(ctx)
+
+	salesByDay, err := s.salesOverTime(ctx, 10)
+	if err != nil {
+		return nil, err
+	}
+	salesByMonth, err := s.salesOverTime(ctx, 7)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"users": users, "sellers": sellers, "deliveryAgents": agents,
+		"products": products, "orders": orders, "revenue": revenue,
+		"deliveredOrders": deliveredOrders, "topSellingProducts": topProducts,
+		"salesByVillage": salesByVillage, "salesByCategory": salesByCategory,
+		"lowStockProducts": lowStockProducts, "salesByDay": salesByDay, "salesByMonth": salesByMonth,
+	}, nil
+}
+
+func (s *Store) aggregateRows(ctx context.Context, collection string, pipeline mongo.Pipeline) ([]bson.M, error) {
+	cursor, err := s.DB.Collection(collection).Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+	rows := make([]bson.M, 0)
+	if err := cursor.All(ctx, &rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (s *Store) salesOverTime(ctx context.Context, dateLength int32) ([]bson.M, error) {
+	dateExpression := bson.M{"$substrBytes": bson.A{"$createdAt", 0, dateLength}}
+	return s.aggregateRows(ctx, "orders", mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"status": models.OrderDelivered, "createdAt": bson.M{"$type": "string"}}}},
+		{{Key: "$group", Value: bson.M{"_id": dateExpression, "revenue": bson.M{"$sum": "$subtotal"}, "orders": bson.M{"$sum": 1}}}},
+		{{Key: "$sort", Value: bson.D{{Key: "_id", Value: 1}}}},
+	})
+}
+
+func analyticsFloat(value interface{}) float64 {
+	switch number := value.(type) {
+	case float64:
+		return number
+	case int32:
+		return float64(number)
+	case int64:
+		return float64(number)
+	default:
+		return 0
+	}
+}
+
+func analyticsInt64(value interface{}) int64 {
+	switch number := value.(type) {
+	case int32:
+		return int64(number)
+	case int64:
+		return number
+	case float64:
+		return int64(number)
+	default:
+		return 0
+	}
+}
+
+func (s *Store) fallbackAnalytics(ctx context.Context) (map[string]interface{}, error) {
 	users, err := s.ListUsers(ctx)
 	if err != nil {
 		return nil, err
@@ -1090,19 +1833,65 @@ func (s *Store) GetAnalytics(ctx context.Context) (map[string]interface{}, error
 	if err != nil {
 		return nil, err
 	}
-
-	revenue := 0.0
-	for _, order := range orders {
-		revenue += order.Total
+	villages, _ := s.ListVillages(ctx)
+	villageNames := make(map[string]string, len(villages))
+	for _, village := range villages {
+		villageNames[village.ID] = village.Name
 	}
-
+	productByID := make(map[string]models.Product, len(products))
+	for _, product := range products {
+		productByID[product.ID] = product
+	}
+	byProduct := map[string]map[string]interface{}{}
+	byVillage := map[string]map[string]interface{}{}
+	byCategory := map[string]map[string]interface{}{}
+	byDay := map[string]map[string]interface{}{}
+	byMonth := map[string]map[string]interface{}{}
+	var revenue float64
+	var delivered int
+	for _, order := range orders {
+		if order.Status != models.OrderDelivered {
+			continue
+		}
+		delivered++
+		revenue += order.Subtotal
+		villageName := villageNames[order.VillageID]
+		if villageName == "" {
+			villageName = order.VillageID
+		}
+		addAnalyticsGroup(byVillage, order.VillageID, "name", villageName, "orders", 1, "revenue", order.Subtotal)
+		if len(order.CreatedAt) >= 10 {
+			addAnalyticsGroup(byDay, order.CreatedAt[:10], "date", order.CreatedAt[:10], "orders", 1, "revenue", order.Subtotal)
+		}
+		if len(order.CreatedAt) >= 7 {
+			addAnalyticsGroup(byMonth, order.CreatedAt[:7], "month", order.CreatedAt[:7], "orders", 1, "revenue", order.Subtotal)
+		}
+		for _, item := range order.Items {
+			product := productByID[item.ProductID]
+			addAnalyticsGroup(byProduct, item.ProductID, "name", item.Name, "unitsSold", item.Quantity, "revenue", item.LineTotal)
+			addAnalyticsGroup(byCategory, product.Category, "category", product.Category, "unitsSold", item.Quantity, "revenue", item.LineTotal)
+		}
+	}
+	lowStock := make([]models.Product, 0)
+	for _, product := range products {
+		if product.Stock <= 5 {
+			lowStock = append(lowStock, product)
+		}
+	}
+	sort.Slice(lowStock, func(i, j int) bool { return lowStock[i].Stock < lowStock[j].Stock })
+	if len(lowStock) > 10 {
+		lowStock = lowStock[:10]
+	}
+	topProducts := analyticsGroupValues(byProduct, "unitsSold")
+	if len(topProducts) > 5 {
+		topProducts = topProducts[:5]
+	}
 	stats := map[string]interface{}{
-		"users":          len(users),
-		"sellers":        0,
-		"deliveryAgents": 0,
-		"products":       len(products),
-		"orders":         len(orders),
-		"revenue":        revenue,
+		"users": len(users), "sellers": 0, "deliveryAgents": 0,
+		"products": len(products), "orders": len(orders), "revenue": revenue, "deliveredOrders": delivered,
+		"topSellingProducts": topProducts, "salesByVillage": analyticsGroupValues(byVillage, "revenue"),
+		"salesByCategory": analyticsGroupValues(byCategory, "revenue"), "lowStockProducts": lowStock,
+		"salesByDay": analyticsGroupValues(byDay, "date"), "salesByMonth": analyticsGroupValues(byMonth, "month"),
 	}
 	for _, user := range users {
 		switch user.Role {
@@ -1113,6 +1902,34 @@ func (s *Store) GetAnalytics(ctx context.Context) (map[string]interface{}, error
 		}
 	}
 	return stats, nil
+}
+
+func addAnalyticsGroup(groups map[string]map[string]interface{}, id, labelKey string, label interface{}, countKey string, count int, amountKey string, amount float64) {
+	group, exists := groups[id]
+	if !exists {
+		group = map[string]interface{}{labelKey: label, countKey: 0, amountKey: 0.0}
+		groups[id] = group
+	}
+	group[countKey] = group[countKey].(int) + count
+	group[amountKey] = group[amountKey].(float64) + amount
+}
+
+func analyticsGroupValues(groups map[string]map[string]interface{}, sortKey string) []map[string]interface{} {
+	values := make([]map[string]interface{}, 0, len(groups))
+	for _, group := range groups {
+		values = append(values, group)
+	}
+	sort.Slice(values, func(i, j int) bool {
+		if sortKey == "date" || sortKey == "month" {
+			return values[i][sortKey].(string) < values[j][sortKey].(string)
+		}
+		left, right := analyticsFloat(values[i][sortKey]), analyticsFloat(values[j][sortKey])
+		if left == right {
+			return fmt.Sprint(values[i]["name"]) < fmt.Sprint(values[j]["name"])
+		}
+		return left > right
+	})
+	return values
 }
 
 func (s *Store) ListDeliveries(ctx context.Context) ([]models.DeliveryAssignment, error) {

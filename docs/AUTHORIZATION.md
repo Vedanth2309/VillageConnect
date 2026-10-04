@@ -42,6 +42,7 @@ resource ownership check.
 | GET | `/api/orders` | CUSTOMER, SELLER, ADMIN | Results filtered to the caller's customer/seller orders; admin sees all |
 | GET | `/api/orders/:id` | CUSTOMER, SELLER, ADMIN | Order customer/seller ownership or admin access required |
 | GET | `/api/orders/:id/tracking` | CUSTOMER | Customer must own the order; returns status history |
+| GET | `/api/orders/:id/reviews` | CUSTOMER | Customer must own the order; returns reviews for its purchased items |
 | GET | `/api/cart` | CUSTOMER | Returns the caller's MongoDB cart with current catalog values and calculated totals |
 | POST | `/api/cart/items` | CUSTOMER | Adds a product after village, stock, availability, and verified-seller checks |
 | PUT | `/api/cart/items/:productId` | CUSTOMER | Updates only the caller's cart quantity; stock is revalidated |
@@ -59,12 +60,23 @@ resource ownership check.
 | PATCH | `/api/deliveries/:id/status` | DELIVERY_AGENT, ADMIN | Agent must be assigned; status transition is validated |
 | GET | `/api/agents/:agentId/deliveries` | DELIVERY_AGENT, ADMIN | Agent may query only own ID |
 | GET | `/api/admin/users` | ADMIN | Password hashes are removed from responses |
+| PATCH | `/api/admin/users/:id/active` | ADMIN | Deactivating the current administrator is rejected |
+| GET, PATCH | `/api/admin/sellers`, `/api/admin/sellers/:id/status` | ADMIN | Approve, verify, reject, or suspend seller accounts |
+| GET, PATCH | `/api/admin/agents`, `/api/admin/agents/:id/active` | ADMIN | Agent account activation and performance data |
+| GET, POST, PUT, PATCH | `/api/admin/villages` and `/api/admin/villages/:id` | ADMIN | Manage village hierarchy and active state |
+| GET, POST, PUT, PATCH | `/api/admin/categories` and `/api/admin/categories/:id` | ADMIN | Manage categories and active state |
+| GET, PATCH | `/api/admin/products`, `/api/admin/products/:id/availability` | ADMIN | Inspect and deactivate listings without changing inventory |
+| GET | `/api/admin/orders` | ADMIN | Order search/investigation data |
 | GET | `/api/admin/analytics` | ADMIN | |
 | POST | `/api/admin/search/reindex` | ADMIN | Rebuilds product and seller search indexes from MongoDB |
 | GET | `/api/users` | ADMIN | |
 | POST, GET | `/api/payments`, `/api/payments/:id` | CUSTOMER | Currently returns `501 Not Implemented` after authorization |
-| GET | `/api/reviews`, `/api/reviews/products/:productId` | PUBLIC | Currently returns `501 Not Implemented` |
-| POST | `/api/reviews` | CUSTOMER | Currently returns `501 Not Implemented` after authorization |
+| GET | `/api/reviews?productId=:id`, `/api/reviews/products/:productId` | PUBLIC | Returns product reviews |
+| GET | `/api/reviews?sellerId=:id`, `/api/reviews/sellers/:sellerId` | PUBLIC | Returns seller reviews |
+| POST | `/api/reviews` | CUSTOMER | Customer must own a delivered order containing the product; one review per order item; updates product and seller average ratings |
+| POST | `/api/seller/verification-request` | SELLER | Creates verification-request notifications for active administrators |
+| GET | `/api/notifications`, `/api/notifications/unread-count` | AUTHENTICATED | Returns only the caller's notifications and unread count |
+| PATCH | `/api/notifications/:id/read` | AUTHENTICATED | Notification ownership is checked before marking read |
 | Any unmatched path | `*` | PUBLIC | Returns `404` JSON |
 | Unsupported method | Registered route | Same as route | Returns `405` JSON |
 
@@ -81,6 +93,9 @@ resource ownership check.
 - Public registration cannot select seller, delivery-agent, or admin role.
   Elevated accounts must be provisioned through a trusted administrative
   process. Seller and agent routes also require `verified=true`.
+- Account deactivation is rechecked on authenticated requests, invalidating
+  existing sessions. Missing `active` fields on legacy users, villages, and
+  categories are treated as active for backward compatibility.
 - Products with legacy records lacking `sellerId` are not treated as owned by a
   seller for listing or update operations. Backfill these records before
   expecting seller dashboard access.
@@ -100,5 +115,7 @@ resource ownership check.
   compare-and-set against the prior status and append an audit event. Cancellation
   and rejection release reserved stock once and mark simulated payments
   cancelled/refunded.
-- Payment query endpoints and review handlers remain protected
-  `501 Not Implemented` placeholders and do not claim success.
+- Payment query endpoints remain protected `501 Not Implemented` placeholders
+  and do not claim success. Review submissions require a delivered owned order
+  and a product present in its item snapshot; a unique order/product index
+  prevents duplicate reviews for the same order item.

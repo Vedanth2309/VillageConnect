@@ -215,7 +215,7 @@ func (s *Service) SearchProducts(ctx context.Context, query models.ProductQuery)
 		name := ""
 		found := false
 		for _, village := range villages {
-			if village.ID == query.VillageID {
+			if village.ID == query.VillageID && village.IsActive() {
 				name = village.Name
 				found = true
 			}
@@ -231,6 +231,22 @@ func (s *Service) SearchProducts(ctx context.Context, query models.ProductQuery)
 		}
 		if matches == 1 {
 			query.VillageName = name
+		}
+	}
+	if query.Category != "" {
+		categories, err := s.repository.ListCategories(ctx)
+		if err != nil {
+			return models.ProductPage{}, nil, err
+		}
+		activeCategory := false
+		for _, category := range categories {
+			if category.IsActive() && strings.EqualFold(category.Name, query.Category) {
+				activeCategory = true
+				break
+			}
+		}
+		if !activeCategory {
+			return models.ProductPage{}, nil, ErrInvalidQuery
 		}
 	}
 	if query.Sort == "" {
@@ -421,7 +437,7 @@ func (s *Service) SearchSellers(ctx context.Context, query string) ([]SellerResu
 			}
 			return nil, err
 		}
-		if user.Role == models.RoleSeller && user.Verified {
+		if user.Role == models.RoleSeller && user.Verified && user.IsActive() {
 			sellers = append(sellers, SellerResult{
 				ID: user.ID, Name: user.Name, VillageID: user.VillageID, Verified: user.Verified,
 			})
@@ -440,7 +456,7 @@ func (s *Service) searchSellersInMongo(ctx context.Context, query string) ([]Sel
 	}
 	results := make([]SellerResult, 0)
 	for _, user := range users {
-		if user.Role == models.RoleSeller && user.Verified &&
+		if user.Role == models.RoleSeller && user.Verified && user.IsActive() &&
 			(query == "" || strings.Contains(strings.ToLower(user.Name), strings.ToLower(query))) {
 			results = append(results, SellerResult{ID: user.ID, Name: user.Name,
 				VillageID: user.VillageID, Verified: user.Verified})

@@ -9,29 +9,48 @@ type Village struct {
 	District string `json:"district" bson:"district"`
 	Taluk    string `json:"taluk" bson:"taluk"`
 	State    string `json:"state" bson:"state"`
+	Active   *bool  `json:"active,omitempty" bson:"active,omitempty"`
 }
 
 // Category represents the product grouping used in marketplace discovery.
 type Category struct {
-	ID   string `json:"id" bson:"_id"`
-	Name string `json:"name" bson:"name"`
+	ID     string `json:"id" bson:"_id"`
+	Name   string `json:"name" bson:"name"`
+	Active *bool  `json:"active,omitempty" bson:"active,omitempty"`
 }
+
+func (v Village) IsActive() bool  { return v.Active == nil || *v.Active }
+func (c Category) IsActive() bool { return c.Active == nil || *c.Active }
 
 // Product represents a catalog item sold by a local seller.
 type Product struct {
-	ID          string  `json:"id" bson:"_id"`
-	Name        string  `json:"name" bson:"name"`
-	Category    string  `json:"category" bson:"category"`
-	Price       float64 `json:"price" bson:"price"`
-	Rating      float64 `json:"rating" bson:"rating"`
-	Unit        string  `json:"unit" bson:"unit"`
-	Village     string  `json:"village" bson:"village"`
-	VillageID   string  `json:"villageId,omitempty" bson:"villageId,omitempty"`
-	SellerID    string  `json:"sellerId,omitempty" bson:"sellerId,omitempty"`
-	Seller      string  `json:"seller" bson:"seller"`
-	Available   bool    `json:"available" bson:"available"`
-	Stock       int     `json:"stock" bson:"stock"`
-	Description string  `json:"description" bson:"description"`
+	ID                string          `json:"id" bson:"_id"`
+	Name              string          `json:"name" bson:"name"`
+	Category          string          `json:"category" bson:"category"`
+	Price             float64         `json:"price" bson:"price"`
+	Rating            float64         `json:"rating" bson:"rating"`
+	RatingCount       int             `json:"ratingCount" bson:"ratingCount,omitempty"`
+	Unit              string          `json:"unit" bson:"unit"`
+	Village           string          `json:"village" bson:"village"`
+	VillageID         string          `json:"villageId,omitempty" bson:"villageId,omitempty"`
+	SellerID          string          `json:"sellerId,omitempty" bson:"sellerId,omitempty"`
+	Seller            string          `json:"seller" bson:"seller"`
+	Available         bool            `json:"available" bson:"available"`
+	Stock             int             `json:"stock" bson:"stock"`
+	Description       string          `json:"description" bson:"description"`
+	History           []ProductChange `json:"-" bson:"history,omitempty"`
+	RestockedOrderIDs []string        `json:"-" bson:"restockedOrderIds,omitempty"`
+	ExpectedStock     *int            `json:"-" bson:"-"`
+	Change            *ProductChange  `json:"-" bson:"-"`
+}
+
+type ProductChange struct {
+	ActorID       string   `json:"actorId" bson:"actorId"`
+	ChangedAt     string   `json:"changedAt" bson:"changedAt"`
+	PreviousPrice *float64 `json:"previousPrice,omitempty" bson:"previousPrice,omitempty"`
+	NewPrice      *float64 `json:"newPrice,omitempty" bson:"newPrice,omitempty"`
+	PreviousStock *int     `json:"previousStock,omitempty" bson:"previousStock,omitempty"`
+	NewStock      *int     `json:"newStock,omitempty" bson:"newStock,omitempty"`
 }
 
 type ProductQuery struct {
@@ -67,15 +86,23 @@ const (
 
 // User is the base identity model used by authentication and authorization.
 type User struct {
-	ID           string   `json:"id" bson:"_id"`
-	Name         string   `json:"name" bson:"name"`
-	Email        string   `json:"email" bson:"email"`
-	Phone        string   `json:"phone" bson:"phone"`
-	VillageID    string   `json:"villageId" bson:"villageId"`
-	Role         UserRole `json:"role" bson:"role"`
-	Verified     bool     `json:"verified" bson:"verified"`
-	PasswordHash string   `json:"-" bson:"passwordHash"`
+	ID             string   `json:"id" bson:"_id"`
+	Name           string   `json:"name" bson:"name"`
+	Email          string   `json:"email" bson:"email"`
+	Phone          string   `json:"phone" bson:"phone"`
+	VillageID      string   `json:"villageId" bson:"villageId"`
+	Role           UserRole `json:"role" bson:"role"`
+	Verified       bool     `json:"verified" bson:"verified"`
+	Active         *bool    `json:"active,omitempty" bson:"active,omitempty"`
+	SellerStatus   string   `json:"sellerStatus,omitempty" bson:"sellerStatus,omitempty"`
+	Rating         float64  `json:"rating,omitempty" bson:"rating,omitempty"`
+	RatingCount    int      `json:"ratingCount,omitempty" bson:"ratingCount,omitempty"`
+	AgentOnline    bool     `json:"agentOnline" bson:"agentOnline,omitempty"`
+	AgentAvailable bool     `json:"agentAvailable" bson:"agentAvailable,omitempty"`
+	PasswordHash   string   `json:"-" bson:"passwordHash"`
 }
+
+func (u User) IsActive() bool { return u.Active == nil || *u.Active }
 
 // AuthSession stores revocation state for a short-lived JWT session.
 type AuthSession struct {
@@ -152,6 +179,29 @@ type OrderStatusEvent struct {
 	CreatedAt string      `json:"createdAt" bson:"createdAt"`
 }
 
+type Review struct {
+	ID            string `json:"id" bson:"_id"`
+	OrderID       string `json:"orderId" bson:"orderId"`
+	ProductID     string `json:"productId" bson:"productId"`
+	SellerID      string `json:"sellerId" bson:"sellerId"`
+	CustomerID    string `json:"-" bson:"customerId"`
+	ProductRating int    `json:"productRating" bson:"productRating"`
+	SellerRating  int    `json:"sellerRating" bson:"sellerRating"`
+	Comment       string `json:"comment,omitempty" bson:"comment,omitempty"`
+	CreatedAt     string `json:"createdAt" bson:"createdAt"`
+}
+
+type Notification struct {
+	ID        string    `json:"id" bson:"_id"`
+	UserID    string    `json:"userId" bson:"userId"`
+	Type      string    `json:"type" bson:"type"`
+	Title     string    `json:"title" bson:"title"`
+	Message   string    `json:"message" bson:"message"`
+	EntityID  string    `json:"entityId,omitempty" bson:"entityId,omitempty"`
+	Read      bool      `json:"read" bson:"read"`
+	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
+}
+
 // OrderItem models a single line item inside an order.
 type OrderItem struct {
 	ProductID string  `json:"productId" bson:"productId"`
@@ -203,13 +253,49 @@ type CartView struct {
 
 // DeliveryAssignment tracks the dispatch of an order to a local agent.
 type DeliveryAssignment struct {
-	ID         string `json:"id" bson:"_id"`
-	OrderID    string `json:"orderId" bson:"orderId"`
-	AgentID    string `json:"agentId" bson:"agentId"`
-	Status     string `json:"status" bson:"status"`
-	PickupCode string `json:"pickupCode" bson:"pickupCode"`
-	CreatedAt  string `json:"createdAt" bson:"createdAt"`
-	UpdatedAt  string `json:"updatedAt" bson:"updatedAt"`
+	ID                  string                `json:"id" bson:"_id"`
+	OrderID             string                `json:"orderId" bson:"orderId"`
+	AgentID             string                `json:"agentId" bson:"agentId"`
+	Status              string                `json:"status" bson:"status"`
+	PickupCode          string                `json:"-" bson:"pickupCode"`
+	CreatedAt           string                `json:"createdAt" bson:"createdAt"`
+	UpdatedAt           string                `json:"updatedAt" bson:"updatedAt"`
+	AcceptedAt          string                `json:"acceptedAt,omitempty" bson:"acceptedAt,omitempty"`
+	PickedUpAt          string                `json:"pickedUpAt,omitempty" bson:"pickedUpAt,omitempty"`
+	InTransitAt         string                `json:"inTransitAt,omitempty" bson:"inTransitAt,omitempty"`
+	DeliveredAt         string                `json:"deliveredAt,omitempty" bson:"deliveredAt,omitempty"`
+	FailedAt            string                `json:"failedAt,omitempty" bson:"failedAt,omitempty"`
+	CancelledAt         string                `json:"cancelledAt,omitempty" bson:"cancelledAt,omitempty"`
+	CustomerConfirmedAt string                `json:"customerConfirmedAt,omitempty" bson:"customerConfirmedAt,omitempty"`
+	History             []DeliveryStatusEvent `json:"history" bson:"history,omitempty"`
+	Order               *DeliveryOrderSummary `json:"order,omitempty" bson:"-"`
+}
+
+const (
+	DeliveryAssigned  = "assigned"
+	DeliveryAccepted  = "accepted"
+	DeliveryPickedUp  = "picked_up"
+	DeliveryInTransit = "in_transit"
+	DeliveryDelivered = "delivered"
+	DeliveryFailed    = "failed"
+	DeliveryCancelled = "cancelled"
+)
+
+type DeliveryStatusEvent struct {
+	Status    string   `json:"status" bson:"status"`
+	ActorID   string   `json:"actorId" bson:"actorId"`
+	ActorRole UserRole `json:"actorRole" bson:"actorRole"`
+	Note      string   `json:"note,omitempty" bson:"note,omitempty"`
+	CreatedAt string   `json:"createdAt" bson:"createdAt"`
+}
+
+type DeliveryOrderSummary struct {
+	ID              string      `json:"id"`
+	VillageID       string      `json:"villageId"`
+	Items           []OrderItem `json:"items"`
+	Address         string      `json:"address,omitempty"`
+	FulfillmentType string      `json:"fulfillmentType"`
+	Status          OrderStatus `json:"status"`
 }
 
 var DefaultVillages = []Village{
@@ -236,7 +322,7 @@ var DefaultProducts = []Product{
 var DefaultUsers = []User{
 	{ID: "u1", Name: "Demo Customer", Email: "customer@villageconnect.local", Phone: "9876543210", VillageID: "v1", Role: RoleCustomer, Verified: true, PasswordHash: "$2a$10$N/SX32qMeRglNnVB05ezX.9Ktq4.yUcvC/o7OMIFFIbKgAhfQs1Wi"},
 	{ID: "u2", Name: "Demo Seller", Email: "seller@villageconnect.local", Phone: "9123456780", VillageID: "v1", Role: RoleSeller, Verified: true, PasswordHash: "$2a$10$N/SX32qMeRglNnVB05ezX.9Ktq4.yUcvC/o7OMIFFIbKgAhfQs1Wi"},
-	{ID: "u3", Name: "Demo Agent", Email: "agent@villageconnect.local", Phone: "9988776655", VillageID: "v1", Role: RoleDeliveryAgent, Verified: true, PasswordHash: "$2a$10$N/SX32qMeRglNnVB05ezX.9Ktq4.yUcvC/o7OMIFFIbKgAhfQs1Wi"},
+	{ID: "u3", Name: "Demo Agent", Email: "agent@villageconnect.local", Phone: "9988776655", VillageID: "v1", Role: RoleDeliveryAgent, Verified: true, AgentOnline: true, AgentAvailable: true, PasswordHash: "$2a$10$N/SX32qMeRglNnVB05ezX.9Ktq4.yUcvC/o7OMIFFIbKgAhfQs1Wi"},
 	{ID: "u4", Name: "Demo Admin", Email: "admin@villageconnect.local", Phone: "9090909090", VillageID: "v1", Role: RoleAdmin, Verified: true, PasswordHash: "$2a$10$N/SX32qMeRglNnVB05ezX.9Ktq4.yUcvC/o7OMIFFIbKgAhfQs1Wi"},
 	{ID: "u5", Name: "Green Valley Farm", Email: "green-valley@villageconnect.local", Phone: "9000000005", VillageID: "v1", Role: RoleSeller, Verified: true, PasswordHash: "$2a$10$N/SX32qMeRglNnVB05ezX.9Ktq4.yUcvC/o7OMIFFIbKgAhfQs1Wi"},
 	{ID: "u6", Name: "Sunrise Orchard", Email: "sunrise@villageconnect.local", Phone: "9000000006", VillageID: "v2", Role: RoleSeller, Verified: true, PasswordHash: "$2a$10$N/SX32qMeRglNnVB05ezX.9Ktq4.yUcvC/o7OMIFFIbKgAhfQs1Wi"},

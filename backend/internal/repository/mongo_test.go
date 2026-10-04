@@ -202,3 +202,168 @@ func TestConcurrentCheckoutsCannotOversellSingleProduct(t *testing.T) {
 		t.Fatalf("failed checkout persisted partial records: orders=%d payments=%d", len(store.orders), len(store.payments))
 	}
 }
+
+func TestProductUpdateRecordsHistoryAndRejectsStaleStock(t *testing.T) {
+	store := &Store{
+		Fallback: true,
+		products: []models.Product{{ID: "p1", Price: 10, Stock: 5, Available: true}},
+	}
+	expectedStock := 5
+	previousPrice, newPrice := 10.0, 12.0
+	previousStock, newStock := 5, 8
+	change := models.ProductChange{
+		ActorID: "seller-1", ChangedAt: "2026-10-04T10:00:00Z",
+		PreviousPrice: &previousPrice, NewPrice: &newPrice,
+		PreviousStock: &previousStock, NewStock: &newStock,
+	}
+	product := models.Product{ID: "p1", Price: newPrice, Stock: newStock, Available: true,
+		ExpectedStock: &expectedStock, Change: &change}
+	if err := store.UpdateProduct(context.Background(), product); err != nil {
+		t.Fatalf("UpdateProduct returned error: %v", err)
+	}
+	if len(store.products[0].History) != 1 || store.products[0].History[0].ActorID != "seller-1" {
+		t.Fatalf("product history was not recorded: %+v", store.products[0].History)
+	}
+	unchangedStock := store.products[0].Stock
+	nameOnlyUpdate := store.products[0]
+	nameOnlyUpdate.ExpectedStock = &unchangedStock
+	nameOnlyUpdate.Description = "Updated description"
+	if err := store.UpdateProduct(context.Background(), nameOnlyUpdate); err != nil {
+		t.Fatalf("name-only UpdateProduct returned error: %v", err)
+	}
+	if len(store.products[0].History) != 1 {
+		t.Fatalf("name-only update duplicated product history: %+v", store.products[0].History)
+	}
+
+	staleExpectedStock := 5
+	product.Stock = 9
+	product.ExpectedStock = &staleExpectedStock
+	if err := store.UpdateProduct(context.Background(), product); err != ErrConflict {
+		t.Fatalf("stale stock update error = %v, want conflict", err)
+	}
+	if store.products[0].Stock != 8 || len(store.products[0].History) != 1 {
+		t.Fatalf("stale stock update changed product: %+v", store.products[0])
+	}
+}
+
+func TestRestoreOrderInventoryResumesWithoutDoubleRestocking(t *testing.T) {
+	store := &Store{
+		Fallback: true,
+		products: []models.Product{
+			{ID: "p1", Stock: 7, RestockedOrderIDs: []string{"o-restore"}},
+			{ID: "p2", Stock: 1},
+		},
+		orders: []models.Order{{ID: "o-restore", Status: models.OrderRejected, InventoryReserved: true,
+			Items: []models.OrderItem{{ProductID: "p1", Quantity: 2}, {ProductID: "p2", Quantity: 3}}}},
+	}
+
+	if _, err := store.RestoreOrderInventory(context.Background(), "o-restore"); err != nil {
+		t.Fatalf("RestoreOrderInventory returned error: %v", err)
+	}
+	if store.products[0].Stock != 7 || store.products[1].Stock != 4 || !store.orders[0].InventoryRestored {
+		t.Fatalf("partial restoration was not resumed correctly: products=%+v order=%+v", store.products, store.orders[0])
+	}
+	if len(store.products[0].RestockedOrderIDs) != 0 {
+		t.Fatalf("completed restoration left a product marker behind: %+v", store.products[0].RestockedOrderIDs)
+	}
+	if _, err := store.RestoreOrderInventory(context.Background(), "o-restore"); err != nil {
+		t.Fatalf("repeated RestoreOrderInventory returned error: %v", err)
+	}
+	if store.products[0].Stock != 7 || store.products[1].Stock != 4 {
+		t.Fatalf("repeated restoration changed inventory: %+v", store.products)
+	}
+}
+
+func TestCreateReviewFallbackUpdatesProductAndSellerAveragesOnce(t *testing.T) {
+	store := &Store{
+		Fallback: true,
+		users:    []models.User{{ID: "seller-1", Role: models.RoleSeller}},
+		products: []models.Product{{ID: "product-1", SellerID: "seller-1", Rating: 4.5}},
+	}
+	first := models.Review{ID: "review-1", OrderID: "order-1", ProductID: "product-1", SellerID: "seller-1",
+		CustomerID: "customer-1", ProductRating: 5, SellerRating: 4}
+	if err := store.CreateReview(context.Background(), first); err != nil {
+		t.Fatalf("CreateReview returned error: %v", err)
+	}
+	second := models.Review{ID: "review-2", OrderID: "order-2", ProductID: "product-1", SellerID: "seller-1",
+		CustomerID: "customer-2", ProductRating: 3, SellerRating: 2}
+	if err := store.CreateReview(context.Background(), second); err != nil {
+		t.Fatalf("second CreateReview returned error: %v", err)
+	}
+	if got := store.products[0]; got.Rating != 4 || got.RatingCount != 2 {
+		t.Fatalf("product rating = %.2f (%d), want 4.00 (2)", got.Rating, got.RatingCount)
+	}
+	if got := store.users[0]; got.Rating != 3 || got.RatingCount != 2 {
+		t.Fatalf("seller rating = %.2f (%d), want 3.00 (2)", got.Rating, got.RatingCount)
+	}
+	if err := store.CreateReview(context.Background(), second); err != ErrConflict {
+		t.Fatalf("duplicate order-item review error = %v, want conflict", err)
+	}
+}
+
+func TestAnalyticsFallbackAggregatesDeliveredSalesAndLowStock(t *testing.T) {
+	store := &Store{
+		Fallback: true,
+		users: []models.User{{ID: "seller-1", Role: models.RoleSeller},
+			{ID: "agent-1", Role: models.RoleDeliveryAgent}},
+		villages: []models.Village{{ID: "v1", Name: "Kudlu"}},
+		products: []models.Product{{ID: "p1", Name: "Tomato", Category: "Vegetables", Stock: 3}},
+		orders: []models.Order{
+			{ID: "o1", Status: models.OrderDelivered, VillageID: "v1", Subtotal: 20, Total: 25,
+				CreatedAt: "2026-09-01T10:00:00Z", Items: []models.OrderItem{{ProductID: "p1", Name: "Tomato", Quantity: 2, LineTotal: 20}}},
+			{ID: "o2", Status: models.OrderCancelled, VillageID: "v1", Subtotal: 90, Total: 95},
+		},
+	}
+	stats, err := store.GetAnalytics(context.Background())
+	if err != nil {
+		t.Fatalf("GetAnalytics returned error: %v", err)
+	}
+	if stats["users"] != 2 || stats["sellers"] != 1 || stats["deliveryAgents"] != 1 || stats["revenue"] != 20.0 {
+		t.Fatalf("unexpected analytics totals: %+v", stats)
+	}
+	topProducts := stats["topSellingProducts"].([]map[string]interface{})
+	if len(topProducts) != 1 || topProducts[0]["name"] != "Tomato" || topProducts[0]["unitsSold"] != 2 {
+		t.Fatalf("unexpected top products: %+v", topProducts)
+	}
+	villageSales := stats["salesByVillage"].([]map[string]interface{})
+	if len(villageSales) != 1 || villageSales[0]["name"] != "Kudlu" || villageSales[0]["revenue"] != 20.0 {
+		t.Fatalf("unexpected village sales: %+v", villageSales)
+	}
+	categorySales := stats["salesByCategory"].([]map[string]interface{})
+	if len(categorySales) != 1 || categorySales[0]["category"] != "Vegetables" {
+		t.Fatalf("unexpected category sales: %+v", categorySales)
+	}
+	lowStock := stats["lowStockProducts"].([]models.Product)
+	if len(lowStock) != 1 || lowStock[0].ID != "p1" {
+		t.Fatalf("unexpected low-stock products: %+v", lowStock)
+	}
+}
+
+func TestNotificationsAreScopedAndMarkReadForOwner(t *testing.T) {
+	store := &Store{Fallback: true}
+	first := models.Notification{ID: "n1", UserID: "customer-1", Type: "order_status"}
+	second := models.Notification{ID: "n2", UserID: "seller-1", Type: "new_order"}
+	if err := store.CreateNotification(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateNotification(context.Background(), second); err != nil {
+		t.Fatal(err)
+	}
+	list, err := store.ListNotifications(context.Background(), "customer-1", 20)
+	if err != nil || len(list) != 1 || list[0].ID != "n1" {
+		t.Fatalf("customer notifications=%+v err=%v", list, err)
+	}
+	if _, err := store.ListNotifications(context.Background(), "", 20); err != ErrConflict {
+		t.Fatalf("empty-user notification list error = %v, want conflict", err)
+	}
+	if err := store.MarkNotificationRead(context.Background(), "seller-1", "n1"); err != ErrNotFound {
+		t.Fatalf("cross-user mark-read error = %v, want not found", err)
+	}
+	if err := store.MarkNotificationRead(context.Background(), "customer-1", "n1"); err != nil {
+		t.Fatal(err)
+	}
+	count, err := store.CountUnreadNotifications(context.Background(), "customer-1")
+	if err != nil || count != 0 {
+		t.Fatalf("customer unread count=%d err=%v, want 0", count, err)
+	}
+}

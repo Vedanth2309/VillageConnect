@@ -44,9 +44,11 @@ func main() {
 	catalogService := services.NewCatalogService(store, searchService)
 	orderService := services.NewOrderService(store)
 	deliveryService := services.NewDeliveryService(store, orderService)
+	reviewService := services.NewReviewService(store, searchService)
+	notificationService := services.NewNotificationService(store)
 	adminService := services.NewAdminService(store)
 	api := handlers.NewAPI(userService, catalogService, orderService, deliveryService,
-		adminService, searchService, cfg.JWTSecret)
+		reviewService, notificationService, adminService, searchService, cfg.JWTSecret)
 
 	router := routes.New(api, func() string {
 		if store.HealthStatus() == "fallback" {

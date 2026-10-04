@@ -45,6 +45,11 @@ type DeliveryService struct {
 	repo   repository.Repository
 	orders *OrderService
 }
+type ReviewService struct {
+	repo    repository.Repository
+	indexer ProductIndexer
+}
+type NotificationService struct{ repo repository.Repository }
 type AdminService struct{ repo repository.Repository }
 
 type ProductIndexer interface {
@@ -72,6 +77,123 @@ func NewDeliveryService(repo repository.Repository, orderServices ...*OrderServi
 }
 func NewAdminService(repo repository.Repository) *AdminService {
 	return &AdminService{repo: repo}
+}
+func NewReviewService(repo repository.Repository, indexers ...ProductIndexer) *ReviewService {
+	service := &ReviewService{repo: repo}
+	if len(indexers) > 0 {
+		service.indexer = indexers[0]
+	}
+	return service
+}
+func NewNotificationService(repo repository.Repository) *NotificationService {
+	return &NotificationService{repo: repo}
+}
+
+func (s *NotificationService) List(ctx context.Context, userID string, limit int) ([]models.Notification, error) {
+	if limit == 0 {
+		limit = 20
+	}
+	if limit < 1 || limit > 100 {
+		return nil, ErrInvalidInput
+	}
+	return s.repo.ListNotifications(ctx, userID, limit)
+}
+
+func (s *NotificationService) UnreadCount(ctx context.Context, userID string) (int64, error) {
+	return s.repo.CountUnreadNotifications(ctx, userID)
+}
+
+func (s *NotificationService) MarkRead(ctx context.Context, userID, notificationID string) error {
+	return translateRepositoryError(s.repo.MarkNotificationRead(ctx, userID, notificationID))
+}
+
+func createNotification(userID, notificationType, title, message, entityID string) models.Notification {
+	return models.Notification{
+		ID: fmt.Sprintf("n%d", time.Now().UnixNano()), UserID: userID,
+		Type: notificationType, Title: title, Message: message, EntityID: entityID,
+		CreatedAt: time.Now().UTC(),
+	}
+}
+
+func sendNotification(ctx context.Context, repo repository.Repository, notification models.Notification) {
+	if notification.UserID == "" {
+		return
+	}
+	if err := repo.CreateNotification(ctx, notification); err != nil {
+		log.Printf("notification %s could not be persisted: %v", notification.ID, err)
+	}
+}
+
+func (s *ReviewService) ForOrder(ctx context.Context, orderID string) ([]models.Review, error) {
+	return s.repo.ListReviewsByOrder(ctx, orderID)
+}
+
+func (s *ReviewService) ForProduct(ctx context.Context, productID string) ([]models.Review, error) {
+	if strings.TrimSpace(productID) == "" {
+		return nil, ErrInvalidInput
+	}
+	return s.repo.ListReviewsByProduct(ctx, productID)
+}
+
+func (s *ReviewService) ForSeller(ctx context.Context, sellerID string) ([]models.Review, error) {
+	if strings.TrimSpace(sellerID) == "" {
+		return nil, ErrInvalidInput
+	}
+	return s.repo.ListReviewsBySeller(ctx, sellerID)
+}
+
+func (s *ReviewService) Create(ctx context.Context, customerID, orderID, productID string,
+	productRating, sellerRating int, comment string) (*models.Review, error) {
+	orderID = strings.TrimSpace(orderID)
+	productID = strings.TrimSpace(productID)
+	comment = strings.TrimSpace(comment)
+	if orderID == "" || productID == "" || productRating < 1 || productRating > 5 ||
+		sellerRating < 1 || sellerRating > 5 || len(comment) > 1000 {
+		return nil, ErrInvalidInput
+	}
+	order, err := s.repo.GetOrderByID(ctx, orderID)
+	if err != nil {
+		return nil, translateRepositoryError(err)
+	}
+	if order.CustomerID != customerID {
+		return nil, ErrForbidden
+	}
+	if order.Status != models.OrderDelivered {
+		return nil, ErrConflict
+	}
+	sellerID := ""
+	purchased := false
+	for _, item := range order.Items {
+		if item.ProductID == productID {
+			purchased = true
+			sellerID = item.SellerID
+			break
+		}
+	}
+	if !purchased {
+		return nil, ErrForbidden
+	}
+	if sellerID == "" {
+		sellerID = order.SellerID
+	}
+	review := models.Review{
+		ID: fmt.Sprintf("r%d", time.Now().UnixNano()), OrderID: order.ID,
+		ProductID: productID, SellerID: sellerID, CustomerID: customerID,
+		ProductRating: productRating, SellerRating: sellerRating,
+		Comment: comment, CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := translateRepositoryError(s.repo.CreateReview(ctx, review)); err != nil {
+		return nil, err
+	}
+	if s.indexer != nil {
+		product, productErr := s.repo.GetProductByID(ctx, productID)
+		if productErr == nil {
+			if indexErr := s.indexer.IndexProduct(ctx, *product); indexErr != nil {
+				log.Printf("review %s saved but product rating indexing failed: %v", review.ID, indexErr)
+			}
+		}
+	}
+	return &review, nil
 }
 
 func (s *UserService) Register(ctx context.Context, name, email, phone, password, villageID, rawRole string) (*models.User, error) {
@@ -138,6 +260,9 @@ func (s *UserService) Authenticate(ctx context.Context, email, password string) 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		return nil, ErrUnauthorized
 	}
+	if !user.IsActive() {
+		return nil, ErrUnauthorized
+	}
 	return user, nil
 }
 
@@ -197,6 +322,9 @@ func (s *UserService) ValidateSession(ctx context.Context, claims *auth.Claims) 
 	if string(user.Role) != claims.Role {
 		return models.User{}, ErrUnauthorized
 	}
+	if !user.IsActive() {
+		return models.User{}, ErrUnauthorized
+	}
 	return *user, nil
 }
 
@@ -232,11 +360,58 @@ func (s *UserService) List(ctx context.Context) ([]models.User, error) {
 	return s.repo.ListUsers(ctx)
 }
 
+func (s *UserService) RequestSellerVerification(ctx context.Context, sellerID string) error {
+	user, err := s.repo.GetUserByID(ctx, sellerID)
+	if err != nil {
+		return translateRepositoryError(err)
+	}
+	if user.Role != models.RoleSeller {
+		return ErrForbidden
+	}
+	if user.Verified && (user.SellerStatus == "" || user.SellerStatus == "approved") {
+		return ErrConflict
+	}
+	if err := translateRepositoryError(s.repo.SetSellerState(ctx, sellerID, "pending", false, true)); err != nil {
+		return err
+	}
+	users, err := s.repo.ListUsers(ctx)
+	if err != nil {
+		return err
+	}
+	for _, admin := range users {
+		if admin.Role == models.RoleAdmin && admin.IsActive() {
+			sendNotification(ctx, s.repo, createNotification(admin.ID, "seller_verification", "Seller verification requested",
+				fmt.Sprintf("%s requested seller verification.", user.Name), sellerID))
+		}
+	}
+	return nil
+}
+
 func (s *CatalogService) Villages(ctx context.Context) ([]models.Village, error) {
-	return s.repo.ListVillages(ctx)
+	villages, err := s.repo.ListVillages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	active := make([]models.Village, 0, len(villages))
+	for _, village := range villages {
+		if village.IsActive() {
+			active = append(active, village)
+		}
+	}
+	return active, nil
 }
 func (s *CatalogService) Categories(ctx context.Context) ([]models.Category, error) {
-	return s.repo.ListCategories(ctx)
+	categories, err := s.repo.ListCategories(ctx)
+	if err != nil {
+		return nil, err
+	}
+	active := make([]models.Category, 0, len(categories))
+	for _, category := range categories {
+		if category.IsActive() {
+			active = append(active, category)
+		}
+	}
+	return active, nil
 }
 func (s *CatalogService) Products(ctx context.Context, query models.ProductQuery) (models.ProductPage, error) {
 	query.Query = strings.TrimSpace(query.Query)
@@ -261,7 +436,7 @@ func (s *CatalogService) Products(ctx context.Context, query models.ProductQuery
 		found := false
 		villageName := ""
 		for _, village := range villages {
-			if village.ID == query.VillageID {
+			if village.ID == query.VillageID && village.IsActive() {
 				villageName = village.Name
 				found = true
 			}
@@ -278,6 +453,22 @@ func (s *CatalogService) Products(ctx context.Context, query models.ProductQuery
 		query.VillageName = villageName
 		if matchingVillageNames != 1 {
 			query.VillageName = ""
+		}
+	}
+	if query.Category != "" {
+		categories, err := s.repo.ListCategories(ctx)
+		if err != nil {
+			return models.ProductPage{}, err
+		}
+		found := false
+		for _, category := range categories {
+			if category.IsActive() && strings.EqualFold(category.Name, query.Category) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return models.ProductPage{}, ErrInvalidInput
 		}
 	}
 	if query.Sort == "" {
@@ -332,9 +523,33 @@ func (s *CatalogService) UpdateProduct(ctx context.Context, product models.Produ
 	if err := translateRepositoryError(s.repo.UpdateProduct(ctx, product)); err != nil {
 		return err
 	}
+	if product.Change != nil && product.Change.NewStock != nil && *product.Change.NewStock <= 5 {
+		sendNotification(ctx, s.repo, createNotification(product.SellerID, "low_stock", "Low stock alert",
+			fmt.Sprintf("%s now has %d units in stock.", product.Name, *product.Change.NewStock), product.ID))
+	}
 	if s.indexer != nil {
 		if err := s.indexer.IndexProduct(ctx, product); err != nil {
 			log.Printf("product %s updated in MongoDB but search indexing failed: %v", product.ID, err)
+		}
+	}
+	return nil
+}
+
+func (s *CatalogService) SetProductAvailability(ctx context.Context, id string, available bool) error {
+	product, err := s.Product(ctx, id)
+	if err != nil {
+		return err
+	}
+	if available && product.Stock == 0 {
+		return ErrConflict
+	}
+	if err := translateRepositoryError(s.repo.SetProductAvailability(ctx, id, available)); err != nil {
+		return err
+	}
+	product.Available = available
+	if s.indexer != nil {
+		if err := s.indexer.IndexProduct(ctx, *product); err != nil {
+			log.Printf("product %s availability saved but search indexing failed: %v", id, err)
 		}
 	}
 	return nil
@@ -367,32 +582,59 @@ func (s *CatalogService) assignProductVillage(ctx context.Context, product *mode
 	if err != nil {
 		return err
 	}
+	villageFound := false
 	for _, village := range villages {
+		if !village.IsActive() {
+			continue
+		}
 		if product.VillageID != "" && product.VillageID == village.ID {
 			if strings.TrimSpace(product.Village) != "" && !strings.EqualFold(strings.TrimSpace(product.Village), village.Name) {
 				return ErrInvalidInput
 			}
 			product.VillageID = village.ID
 			product.Village = village.Name
-			return nil
+			villageFound = true
+			break
 		}
 		if product.VillageID == "" && strings.EqualFold(strings.TrimSpace(product.Village), village.Name) {
 			product.VillageID = village.ID
 			product.Village = village.Name
-			return nil
+			villageFound = true
+			break
 		}
 	}
-	return ErrInvalidInput
+	if !villageFound {
+		return ErrInvalidInput
+	}
+	categories, err := s.repo.ListCategories(ctx)
+	if err != nil {
+		return err
+	}
+	categoryFound := false
+	for _, category := range categories {
+		if category.IsActive() && strings.EqualFold(strings.TrimSpace(category.Name), strings.TrimSpace(product.Category)) {
+			categoryFound = true
+			break
+		}
+	}
+	if !categoryFound {
+		return ErrInvalidInput
+	}
+	return nil
 }
 
 func validateProduct(product models.Product) error {
 	if strings.TrimSpace(product.Name) == "" ||
+		len(strings.TrimSpace(product.Name)) > 120 ||
 		strings.TrimSpace(product.Category) == "" ||
+		len(strings.TrimSpace(product.Category)) > 100 ||
 		strings.TrimSpace(product.Unit) == "" ||
+		len(strings.TrimSpace(product.Unit)) > 32 ||
 		strings.TrimSpace(product.Village) == "" || strings.TrimSpace(product.VillageID) == "" ||
 		strings.TrimSpace(product.SellerID) == "" ||
 		strings.TrimSpace(product.Seller) == "" ||
 		strings.TrimSpace(product.Description) == "" ||
+		len(strings.TrimSpace(product.Description)) > 2000 ||
 		math.IsNaN(product.Price) || math.IsInf(product.Price, 0) || product.Price <= 0 ||
 		product.Stock < 0 || math.IsNaN(product.Rating) || math.IsInf(product.Rating, 0) ||
 		product.Rating < 0 || product.Rating > 5 || (product.Available && product.Stock == 0) {
@@ -412,6 +654,11 @@ func (s *OrderService) ListForCustomer(ctx context.Context, customerID string) (
 	result := make([]models.Order, 0)
 	for _, order := range orders {
 		if order.CustomerID == customerID {
+			restored, restoreErr := s.restorePendingInventory(ctx, order)
+			if restoreErr != nil {
+				return nil, restoreErr
+			}
+			order = restored
 			result = append(result, order)
 		}
 	}
@@ -425,10 +672,27 @@ func (s *OrderService) ListForSeller(ctx context.Context, sellerID string) ([]mo
 	result := make([]models.Order, 0)
 	for _, order := range orders {
 		if order.SellerID == sellerID {
+			restored, restoreErr := s.restorePendingInventory(ctx, order)
+			if restoreErr != nil {
+				return nil, restoreErr
+			}
+			order = restored
 			result = append(result, order)
 		}
 	}
 	return result, nil
+}
+
+func (s *OrderService) restorePendingInventory(ctx context.Context, order models.Order) (models.Order, error) {
+	if order.InventoryReserved && !order.InventoryRestored &&
+		(order.Status == models.OrderCancelled || order.Status == models.OrderRejected) {
+		restored, err := s.repo.RestoreOrderInventory(ctx, order.ID)
+		if err != nil {
+			return order, translateRepositoryError(err)
+		}
+		return *restored, nil
+	}
+	return order, nil
 }
 func (s *OrderService) Get(ctx context.Context, id string) (*models.Order, error) {
 	order, err := s.repo.GetOrderByID(ctx, id)
@@ -716,6 +980,15 @@ func (s *OrderService) Checkout(ctx context.Context, customerID, villageID, fulf
 	if err := translateRepositoryError(s.repo.CheckoutOrder(ctx, order, payment, cart.Revision)); err != nil {
 		return models.Order{}, err
 	}
+	sendNotification(ctx, s.repo, createNotification(order.SellerID, "new_order", "New order received",
+		fmt.Sprintf("Order %s has been placed.", order.ID), order.ID))
+	for _, item := range order.Items {
+		product, productErr := s.repo.GetProductByID(ctx, item.ProductID)
+		if productErr == nil && product.Stock <= 5 {
+			sendNotification(ctx, s.repo, createNotification(order.SellerID, "low_stock", "Low stock alert",
+				fmt.Sprintf("%s now has %d units in stock.", product.Name, product.Stock), product.ID))
+		}
+	}
 	return order, nil
 }
 
@@ -753,7 +1026,7 @@ func (s *OrderService) productSeller(ctx context.Context, product models.Product
 			}
 		}
 	}
-	if seller == nil || seller.Role != models.RoleSeller || !seller.Verified {
+	if seller == nil || seller.Role != models.RoleSeller || !seller.Verified || !seller.IsActive() {
 		return "", ErrConflict
 	}
 	return seller.ID, nil
@@ -769,6 +1042,9 @@ func (s *OrderService) getVillage(ctx context.Context, villageID string) (*model
 	}
 	for i := range villages {
 		if villages[i].ID == villageID {
+			if !villages[i].IsActive() {
+				return nil, ErrInvalidInput
+			}
 			return &villages[i], nil
 		}
 	}
@@ -868,6 +1144,14 @@ func (s *OrderService) UpdateStatus(ctx context.Context, id string, status model
 	if err != nil {
 		return nil, translateRepositoryError(err)
 	}
+	if actorRole != string(models.RoleCustomer) {
+		sendNotification(ctx, s.repo, createNotification(order.CustomerID, "order_status", "Order status updated",
+			fmt.Sprintf("Order %s is now %s.", order.ID, strings.ReplaceAll(string(status), "_", " ")), order.ID))
+	}
+	if actorRole != string(models.RoleSeller) && actorRole != string(models.RoleAdmin) {
+		sendNotification(ctx, s.repo, createNotification(order.SellerID, "order_status", "Order status updated",
+			fmt.Sprintf("Order %s is now %s.", order.ID, strings.ReplaceAll(string(status), "_", " ")), order.ID))
+	}
 	return updated, nil
 }
 
@@ -961,6 +1245,21 @@ func (s *DeliveryService) Get(ctx context.Context, id string) (*models.DeliveryA
 func (s *DeliveryService) ForAgent(ctx context.Context, agentID string) ([]models.DeliveryAssignment, error) {
 	return s.repo.ListAgentDeliveries(ctx, agentID)
 }
+func (s *DeliveryService) ForOrder(ctx context.Context, orderID string) (*models.DeliveryAssignment, error) {
+	deliveries, err := s.repo.ListDeliveries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var latest *models.DeliveryAssignment
+	for i := range deliveries {
+		if deliveries[i].OrderID == orderID && (latest == nil || deliveries[i].CreatedAt > latest.CreatedAt) {
+			assignment := deliveries[i]
+			latest = &assignment
+		}
+	}
+	return latest, nil
+}
+
 func (s *DeliveryService) Create(ctx context.Context, delivery models.DeliveryAssignment) error {
 	if delivery.OrderID == "" || delivery.AgentID == "" || !validDeliveryStatus(delivery.Status) {
 		return ErrInvalidInput
@@ -982,7 +1281,12 @@ func (s *DeliveryService) Create(ctx context.Context, delivery models.DeliveryAs
 	if agent.Role != models.RoleDeliveryAgent || !agent.Verified {
 		return ErrInvalidInput
 	}
-	return translateRepositoryError(s.repo.CreateDelivery(ctx, delivery))
+	if err := translateRepositoryError(s.repo.CreateDelivery(ctx, delivery)); err != nil {
+		return err
+	}
+	sendNotification(ctx, s.repo, createNotification(delivery.AgentID, "delivery_assignment", "New delivery assignment",
+		fmt.Sprintf("Delivery %s is assigned to order %s.", delivery.ID, delivery.OrderID), delivery.ID))
+	return nil
 }
 func (s *DeliveryService) UpdateStatus(ctx context.Context, id, status, actorID, actorRole string) (*models.DeliveryAssignment, error) {
 	if !validDeliveryStatus(status) {
@@ -1030,6 +1334,10 @@ func (s *DeliveryService) UpdateStatus(ctx context.Context, id, status, actorID,
 	if err != nil {
 		return nil, translateRepositoryError(err)
 	}
+	if order, orderErr := s.repo.GetOrderByID(ctx, delivery.OrderID); orderErr == nil {
+		sendNotification(ctx, s.repo, createNotification(order.CustomerID, "delivery_update", "Delivery updated",
+			fmt.Sprintf("Delivery for order %s is now %s.", order.ID, strings.ReplaceAll(status, "_", " ")), order.ID))
+	}
 	return updated, nil
 }
 func validDeliveryStatus(status string) bool {
@@ -1057,6 +1365,180 @@ func validDeliveryTransition(from, to string) bool {
 
 func (s *AdminService) Analytics(ctx context.Context) (map[string]interface{}, error) {
 	return s.repo.GetAnalytics(ctx)
+}
+
+func (s *AdminService) Villages(ctx context.Context) ([]models.Village, error) {
+	return s.repo.ListVillages(ctx)
+}
+
+func (s *AdminService) Categories(ctx context.Context) ([]models.Category, error) {
+	return s.repo.ListCategories(ctx)
+}
+
+func (s *AdminService) Products(ctx context.Context) ([]models.Product, error) {
+	return s.repo.ListProducts(ctx)
+}
+
+func (s *AdminService) Orders(ctx context.Context) ([]models.Order, error) {
+	return s.repo.ListOrders(ctx)
+}
+
+func (s *AdminService) SetUserActive(ctx context.Context, id string, active bool) error {
+	if _, err := s.repo.GetUserByID(ctx, strings.TrimSpace(id)); err != nil {
+		return translateRepositoryError(err)
+	}
+	return translateRepositoryError(s.repo.SetUserActive(ctx, id, active))
+}
+
+func (s *AdminService) SetSellerState(ctx context.Context, id, action string) error {
+	user, err := s.repo.GetUserByID(ctx, strings.TrimSpace(id))
+	if err != nil {
+		return translateRepositoryError(err)
+	}
+	if user.Role != models.RoleSeller {
+		return ErrInvalidInput
+	}
+	status, verified, active := "", user.Verified, user.IsActive()
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "approve", "verify":
+		status, verified, active = "approved", true, true
+	case "reject":
+		status, verified, active = "rejected", false, false
+	case "suspend":
+		status, verified, active = "suspended", true, false
+	default:
+		return ErrInvalidInput
+	}
+	if err := translateRepositoryError(s.repo.SetSellerState(ctx, id, status, verified, active)); err != nil {
+		return err
+	}
+	if !active {
+		products, err := s.repo.ListSellerProducts(ctx, id)
+		if err != nil {
+			log.Printf("seller %s was suspended but products could not be listed for deactivation: %v", id, err)
+			return nil
+		}
+		for _, product := range products {
+			if err := s.repo.SetProductAvailability(ctx, product.ID, false); err != nil {
+				log.Printf("seller %s was suspended but product %s could not be deactivated: %v", id, product.ID, err)
+			}
+		}
+	}
+	return nil
+}
+
+func (s *AdminService) CreateVillage(ctx context.Context, village models.Village) error {
+	village.Name = strings.TrimSpace(village.Name)
+	village.District = strings.TrimSpace(village.District)
+	village.Taluk = strings.TrimSpace(village.Taluk)
+	village.State = strings.TrimSpace(village.State)
+	if err := validateVillage(village); err != nil {
+		return err
+	}
+	all, err := s.repo.ListVillages(ctx)
+	if err != nil {
+		return err
+	}
+	for _, existing := range all {
+		if strings.EqualFold(existing.Name, village.Name) && strings.EqualFold(existing.District, village.District) &&
+			strings.EqualFold(existing.State, village.State) {
+			return ErrConflict
+		}
+	}
+	active := true
+	village.Active = &active
+	return translateRepositoryError(s.repo.CreateVillage(ctx, village))
+}
+
+func (s *AdminService) UpdateVillage(ctx context.Context, village models.Village) error {
+	village.Name = strings.TrimSpace(village.Name)
+	village.District = strings.TrimSpace(village.District)
+	village.Taluk = strings.TrimSpace(village.Taluk)
+	village.State = strings.TrimSpace(village.State)
+	if err := validateVillage(village); err != nil {
+		return err
+	}
+	all, err := s.repo.ListVillages(ctx)
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, existing := range all {
+		if existing.ID == village.ID {
+			found = true
+			if village.Active == nil {
+				village.Active = existing.Active
+			}
+		} else if strings.EqualFold(existing.Name, village.Name) && strings.EqualFold(existing.District, village.District) &&
+			strings.EqualFold(existing.State, village.State) {
+			return ErrConflict
+		}
+	}
+	if !found {
+		return ErrNotFound
+	}
+	return translateRepositoryError(s.repo.UpdateVillage(ctx, village))
+}
+
+func (s *AdminService) SetVillageActive(ctx context.Context, id string, active bool) error {
+	return translateRepositoryError(s.repo.SetVillageActive(ctx, id, active))
+}
+
+func validateVillage(village models.Village) error {
+	if village.ID == "" || village.Name == "" || village.District == "" || village.State == "" ||
+		len(village.Name) > 120 || len(village.District) > 120 || len(village.Taluk) > 120 || len(village.State) > 120 {
+		return ErrInvalidInput
+	}
+	return nil
+}
+
+func (s *AdminService) CreateCategory(ctx context.Context, category models.Category) error {
+	category.Name = strings.TrimSpace(category.Name)
+	if category.ID == "" || category.Name == "" || len(category.Name) > 100 {
+		return ErrInvalidInput
+	}
+	all, err := s.repo.ListCategories(ctx)
+	if err != nil {
+		return err
+	}
+	for _, existing := range all {
+		if strings.EqualFold(existing.Name, category.Name) {
+			return ErrConflict
+		}
+	}
+	active := true
+	category.Active = &active
+	return translateRepositoryError(s.repo.CreateCategory(ctx, category))
+}
+
+func (s *AdminService) UpdateCategory(ctx context.Context, category models.Category) error {
+	category.Name = strings.TrimSpace(category.Name)
+	if category.ID == "" || category.Name == "" || len(category.Name) > 100 {
+		return ErrInvalidInput
+	}
+	all, err := s.repo.ListCategories(ctx)
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, existing := range all {
+		if existing.ID == category.ID {
+			found = true
+			if category.Active == nil {
+				category.Active = existing.Active
+			}
+		} else if strings.EqualFold(existing.Name, category.Name) {
+			return ErrConflict
+		}
+	}
+	if !found {
+		return ErrNotFound
+	}
+	return translateRepositoryError(s.repo.UpdateCategory(ctx, category))
+}
+
+func (s *AdminService) SetCategoryActive(ctx context.Context, id string, active bool) error {
+	return translateRepositoryError(s.repo.SetCategoryActive(ctx, id, active))
 }
 
 func isMissingUser(err error) bool {
