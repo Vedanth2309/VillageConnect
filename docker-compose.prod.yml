@@ -1,76 +1,76 @@
-services:
-  mongo:
-    image: mongo:7
-    container_name: villageconnect-mongo
-    restart: unless-stopped
-    environment:
-      MONGO_INITDB_DATABASE: villageconnect
-    ports:
-      - '27017:27017'
-    volumes:
-      - mongo_data:/data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+# services:
+#   mongo:
+#     image: mongo:7
+#     container_name: villageconnect-mongo
+#     restart: unless-stopped
+#     environment:
+#       MONGO_INITDB_DATABASE: villageconnect
+#     ports:
+#       - '27017:27017'
+#     volumes:
+#       - mongo_data:/data/db
+#     healthcheck:
+#       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+#       interval: 10s
+#       timeout: 5s
+#       retries: 5
 
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.1
-    container_name: villageconnect-elasticsearch
-    restart: unless-stopped
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - ES_JAVA_OPTS=-Xms512m -Xmx512m
-    ports:
-      - '9200:9200'
-    volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9200 >/dev/null || exit 1"]
-      interval: 10s
-      timeout: 10s
-      retries: 10
+#   elasticsearch:
+#     image: docker.elastic.co/elasticsearch/elasticsearch:8.17.1
+#     container_name: villageconnect-elasticsearch
+#     restart: unless-stopped
+#     environment:
+#       - discovery.type=single-node
+#       - xpack.security.enabled=false
+#       - ES_JAVA_OPTS=-Xms512m -Xmx512m
+#     ports:
+#       - '9200:9200'
+#     volumes:
+#       - elasticsearch_data:/usr/share/elasticsearch/data
+#     healthcheck:
+#       test: ["CMD-SHELL", "curl -fsS http://localhost:9200 >/dev/null || exit 1"]
+#       interval: 10s
+#       timeout: 10s
+#       retries: 10
 
-  backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    container_name: villageconnect-backend
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      PORT: 9090
-      GIN_MODE: release
-      MONGO_URI: mongodb://mongo:27017
-      MONGO_DATABASE: villageconnect
-      ELASTICSEARCH_URL: http://elasticsearch:9200
-      ELASTICSEARCH_INDEX: villageconnect-products
-      FRONTEND_URL: http://localhost:9091
-      JWT_SECRET: ${JWT_SECRET:?Set a unique JWT_SECRET in .env}
-    depends_on:
-      mongo:
-        condition: service_healthy
-      elasticsearch:
-        condition: service_healthy
-    ports:
-      - '9090:9090'
+#   backend:
+#     build:
+#       context: .
+#       dockerfile: backend/Dockerfile
+#     container_name: villageconnect-backend
+#     restart: unless-stopped
+#     env_file:
+#       - .env
+#     environment:
+#       PORT: 9090
+#       GIN_MODE: release
+#       MONGO_URI: mongodb://mongo:27017
+#       MONGO_DATABASE: villageconnect
+#       ELASTICSEARCH_URL: http://elasticsearch:9200
+#       ELASTICSEARCH_INDEX: villageconnect-products
+#       FRONTEND_URL: http://localhost:9091
+#       JWT_SECRET: ${JWT_SECRET:?Set a unique JWT_SECRET in .env}
+#     depends_on:
+#       mongo:
+#         condition: service_healthy
+#       elasticsearch:
+#         condition: service_healthy
+#     ports:
+#       - '9090:9090'
 
-  frontend:
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile
-      args:
-        VITE_API_URL: http://localhost:9090
-    container_name: villageconnect-frontend
-    restart: unless-stopped
-    depends_on:
-      - backend
-    ports:
-      - '9091:80'
+#   frontend:
+#     build:
+#       context: .
+#       dockerfile: frontend/Dockerfile
+#       args:
+#         VITE_API_URL: http://localhost:9090
+#     container_name: villageconnect-frontend
+#     restart: unless-stopped
+#     depends_on:
+#       - backend
+#     ports:
+#       - '9091:80'
 
-volumes:
-  mongo_data:
-  elasticsearch_data:
+# volumes:
+#   mongo_data:
+#   elasticsearch_data:

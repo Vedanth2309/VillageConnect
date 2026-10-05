@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import './App.css'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8081'
 const PAGE_SIZE = 8
 
 const readSavedUser = () => {
@@ -600,6 +600,15 @@ function App() {
   const handleAuthSubmit = async (event) => {
     event.preventDefault()
 
+    if (authMode === 'register' && authForm.password.length < 8) {
+      setAuthMessage('Password must be at least 8 characters.')
+      return
+    }
+    if (authForm.password.length > 72) {
+      setAuthMessage('Password cannot be longer than 72 characters.')
+      return
+    }
+
     const payload = authMode === 'login'
       ? { email: authForm.email, password: authForm.password }
       : {
@@ -631,7 +640,9 @@ function App() {
         role: 'customer',
       })
     } catch (error) {
-      const message = error.response?.data?.message || 'Authentication failed.'
+      const message = authMode === 'register' && error.response?.status === 409
+        ? 'An account with this email already exists. Sign in or use a different email.'
+        : error.response?.data?.message || 'Authentication failed.'
       setAuthMessage(message)
     }
   }
@@ -2182,8 +2193,18 @@ function App() {
               )}
 
               <label>
-                Password
-                <input name="password" type="password" value={authForm.password} onChange={handleAuthChange} placeholder="Password" required />
+                {authMode === 'register' ? 'Password (8-72 characters)' : 'Password'}
+                <input
+                  name="password"
+                  type="password"
+                  value={authForm.password}
+                  onChange={handleAuthChange}
+                  placeholder="Password"
+                  autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
+                  minLength={authMode === 'register' ? 8 : undefined}
+                  maxLength={72}
+                  required
+                />
               </label>
 
               {authMessage && <p className="auth-message">{authMessage}</p>}

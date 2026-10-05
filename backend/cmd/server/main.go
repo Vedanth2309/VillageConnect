@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 
 	"villageconnect/internal/config"
 	"villageconnect/internal/handlers"
@@ -14,10 +15,15 @@ import (
 	"villageconnect/internal/routes"
 	"villageconnect/internal/search"
 	"villageconnect/internal/services"
+
 )
 
 func main() {
-	cfg := config.Load()
+	if err := godotenv.Load("../.env"); err != nil {
+        log.Println("No .env file found, using system environment variables")
+    }
+
+    cfg := config.Load()
 	mode := os.Getenv("GIN_MODE")
 	if err := cfg.Validate(mode); err != nil {
 		log.Fatal(err)

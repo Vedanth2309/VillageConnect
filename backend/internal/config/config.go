@@ -19,7 +19,7 @@ type Config struct {
 
 func Load() Config {
 	return Config{
-		Port:               getEnv("PORT", "8080"),
+		Port:               getEnv("PORT", "8081"),
 		MongoURI:           getEnv("MONGO_URI", "mongodb://localhost:27017"),
 		MongoDatabase:      getEnv("MONGO_DATABASE", "villageconnect"),
 		FrontendURL:        getEnv("FRONTEND_URL", "http://localhost:5173"),

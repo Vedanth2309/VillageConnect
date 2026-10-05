@@ -33,10 +33,10 @@ The site will be available at http://localhost:5173.
 ### Optional local data services
 
 ```bash
-docker compose up -d
+docker compose up -d elasticsearch
 ```
 
-The backend will automatically use MongoDB at `mongodb://localhost:27017` and Elasticsearch at `http://localhost:9200` when those services are running. If they are not available, the app keeps working in resilient fallback mode using the bundled seed data.
+This starts Elasticsearch in Docker and publishes it at `http://localhost:9200`. When the Go backend runs directly on the host, set `ELASTICSEARCH_URL=http://localhost:9200` in the root `.env` file. The hostname `elasticsearch` is only appropriate when the backend also runs inside the same Docker Compose network. Configure MongoDB separately with `MONGO_URI`; if MongoDB is unavailable, the app keeps working in resilient fallback mode using the bundled seed data.
 
 MongoDB remains the source of truth for products and sellers. The Go API synchronizes product creates, updates, and deletes to Elasticsearch; search reads re-hydrate product results from MongoDB. Elasticsearch includes fuzzy full-text, prefix autocomplete, village/category/price/availability filters, and relevance sorting, with MongoDB fallback when search is unavailable. Product and verified-seller indexes are rebuilt at startup and can be rebuilt by an admin with `POST /api/admin/search/reindex` using a valid bearer token.
 
