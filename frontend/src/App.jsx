@@ -1897,7 +1897,7 @@ function App() {
           {user.role === 'admin' && (
             <>
               <nav className="seller-dashboard-tabs admin-dashboard-tabs" aria-label="Admin dashboard sections">
-                {['Overview', 'Users', 'Sellers', 'Delivery Agents', 'Villages', 'Categories', 'Products', 'Orders', 'Seller Verification', 'Analytics'].map((section) => (
+                {['Overview', 'Users', 'Sellers', 'Villages', 'Categories', 'Products', 'Orders', 'Seller Verification', 'Analytics'].map((section) => (
                   <button key={section} type="button" className={adminSection === section ? 'active' : ''}
                     aria-current={adminSection === section ? 'page' : undefined}
                     onClick={() => setAdminSection(section)}>{section}</button>
@@ -2180,14 +2180,46 @@ function App() {
                     <input name="phone" value={authForm.phone} onChange={handleAuthChange} placeholder="Phone number" />
                   </label>
 
-                  <label>
-                    Village
-                    <select name="villageId" value={authForm.villageId} onChange={handleAuthChange}>
-                      {villages.map((village) => (
-                        <option key={village.id} value={village.id}>{village.name}</option>
-                      ))}
-                    </select>
-                  </label>
+                  {authMode === 'register' && (
+                    <>
+                      <label>
+                        Account type
+                        <select
+                          name="role"
+                          value={authForm.role}
+                          onChange={handleAuthChange}
+                          required
+                        >
+                          <option value="customer">Customer</option>
+                          <option value="seller">Seller / Farmer</option>
+                        </select>
+                      </label>
+
+                      <label>
+                        Village
+                        <select
+                          name="villageId"
+                          value={authForm.villageId}
+                          onChange={handleAuthChange}
+                          required={authForm.role === 'seller'}
+                        >
+                          <option value="">Select your village</option>
+                          {villages.map((village) => (
+                            <option key={village.id} value={village.id}>
+                              {village.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      {authForm.role === 'seller' && (
+                        <p className="auth-message">
+                          Your seller account will need admin approval
+                          before you can add products.
+                        </p>
+                      )}
+                    </>
+                  )}
 
                 </>
               )}

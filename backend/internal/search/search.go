@@ -105,6 +105,7 @@ type Service struct {
 	endpoint    string
 	index       string
 	sellerIndex string
+	apiKey string
 }
 
 type indexedDocument struct {
@@ -112,11 +113,16 @@ type indexedDocument struct {
 	Source interface{}
 }
 
-func NewService(repo repository.Repository, endpoint, index string) *Service {
+func NewService(repo repository.Repository, endpoint, index string, apiKeys ...string,) *Service {
+	apiKey := ""
+	if len(apiKeys) > 0 {
+			apiKey = strings.TrimSpace(apiKeys[0])
+	}
 	service := &Service{
 		repository: repo,
 		endpoint:   strings.TrimSpace(endpoint),
 		index:      strings.TrimSpace(index),
+		apiKey:     apiKey,
 	}
 	if service.endpoint == "" || service.index == "" {
 		log.Printf("Elasticsearch endpoint or index is not configured; using MongoDB search")
@@ -149,7 +155,7 @@ func (s *Service) connect(ctx context.Context) error {
 	if s.endpoint == "" || s.index == "" {
 		return errors.New("Elasticsearch endpoint or index is not configured")
 	}
-	client, err := elasticsearch.NewClient(elasticsearch.Config{Addresses: []string{s.endpoint}})
+	client, err := elasticsearch.NewClient(elasticsearch.Config{Addresses: []string{s.endpoint}, APIKey: s.apiKey,})
 	if err != nil {
 		return fmt.Errorf("create Elasticsearch client: %w", err)
 	}

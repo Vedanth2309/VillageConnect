@@ -71,7 +71,7 @@ func New(api *handlers.API, databaseStatus func() string, frontendURL string) *g
 	sellers.GET("", api.Sellers)
 	sellers.GET("/:sellerId", api.GetSeller)
 	sellers.GET("/:sellerId/products", requireAuth,
-		middleware.RequireRoles(string(models.RoleSeller), string(models.RoleAdmin)), api.SellerProducts)
+	middleware.RequireRoles(string(models.RoleSeller), string(models.RoleAdmin)), api.SellerProducts)
 	sellerOrders := apiGroup.Group("/seller/orders", requireAuth, middleware.RequireRoles(string(models.RoleSeller), string(models.RoleAdmin)))
 	sellerOrders.GET("", api.SellerOrders)
 	sellerOrders.GET("/:id", api.SellerOrder)

@@ -299,24 +299,64 @@ type DeliveryOrderSummary struct {
 }
 
 var DefaultVillages = []Village{
-	{ID: "v1", Name: "Kudlu", District: "Udupi", State: "Karnataka"},
-	{ID: "v2", Name: "Anekal", District: "Bengaluru Rural", State: "Karnataka"},
-	{ID: "v3", Name: "Nandigama", District: "Krishna", State: "Andhra Pradesh"},
+	{ID: "v1", Name: "Kudlu", District: "Udupi", Taluk: "Udupi", State: "Karnataka"},
+	{ID: "v2", Name: "Anekal", District: "Bengaluru Rural", Taluk: "Anekal", State: "Karnataka"},
+	{ID: "v3", Name: "Nandigama", District: "Krishna", Taluk: "Nandigama", State: "Andhra Pradesh"},
+	{ID: "v4", Name: "Kumbakonam", District: "Thanjavur", Taluk: "Kumbakonam", State: "Tamil Nadu"},
+	{ID: "v5", Name: "Pollachi", District: "Coimbatore", Taluk: "Pollachi", State: "Tamil Nadu"},
+	{ID: "v6", Name: "Kottayam", District: "Kottayam", Taluk: "Kottayam", State: "Kerala"},
+	{ID: "v7", Name: "Mysuru Rural", District: "Mysuru", Taluk: "Mysuru", State: "Karnataka"},
+	{ID: "v8", Name: "Nashik Rural", District: "Nashik", Taluk: "Nashik", State: "Maharashtra"},
 }
-
 var DefaultCategories = []Category{
 	{ID: "c1", Name: "Vegetables"},
 	{ID: "c2", Name: "Fruits"},
 	{ID: "c3", Name: "Grains"},
 	{ID: "c4", Name: "Dairy"},
+	{ID: "c5", Name: "Spices"},
+	{ID: "c6", Name: "Pickles"},
+	{ID: "c7", Name: "Oils"},
+	{ID: "c8", Name: "Traditional Foods"},
 }
-
 var DefaultProducts = []Product{
-	{ID: "p1", Name: "Fresh Tomato", Category: "Vegetables", Price: 38, Rating: 4.8, Unit: "kg", Village: "Kudlu", VillageID: "v1", SellerID: "u5", Seller: "Green Valley Farm", Available: true, Stock: 22, Description: "Locally grown, bright red tomatoes suited for daily cooking."},
-	{ID: "p2", Name: "Village Mango", Category: "Fruits", Price: 72, Rating: 4.9, Unit: "kg", Village: "Anekal", VillageID: "v2", SellerID: "u6", Seller: "Sunrise Orchard", Available: true, Stock: 18, Description: "Sweet, seasonal mangoes from nearby orchard clusters."},
-	{ID: "p3", Name: "Rice Paddy", Category: "Grains", Price: 44, Rating: 4.6, Unit: "kg", Village: "Nandigama", VillageID: "v3", SellerID: "u7", Seller: "Riverbank Mills", Available: true, Stock: 30, Description: "Traditional grain harvested from local paddy plots."},
-	{ID: "p4", Name: "Farm Eggs", Category: "Dairy", Price: 12, Rating: 4.7, Unit: "dozen", Village: "Kudlu", VillageID: "v1", SellerID: "u8", Seller: "Happy Hen Co-op", Available: true, Stock: 40, Description: "Free-range eggs collected daily from village poultry units."},
-	{ID: "p5", Name: "Cucumber", Category: "Vegetables", Price: 26, Rating: 4.5, Unit: "kg", Village: "Anekal", VillageID: "v2", SellerID: "u9", Seller: "Hill View Greens", Available: false, Stock: 0, Description: "Fresh, crunchy cucumbers ready for quick household meals."},
+	// Kudlu
+	{ID: "p1", Name: "Fresh Tomato", Category: "Vegetables", Price: 38, Rating: 4.8, RatingCount: 24, Unit: "kg", Village: "Kudlu", VillageID: "v1", SellerID: "u5", Seller: "Green Valley Farm", Available: true, Stock: 22, Description: "Locally grown, bright red tomatoes suited for daily cooking."},
+	{ID: "p2", Name: "Fresh Spinach", Category: "Vegetables", Price: 30, Rating: 4.6, RatingCount: 15, Unit: "bunch", Village: "Kudlu", VillageID: "v1", SellerID: "u5", Seller: "Green Valley Farm", Available: true, Stock: 35, Description: "Fresh leafy spinach harvested in the morning."},
+	{ID: "p3", Name: "Red Onions", Category: "Vegetables", Price: 42, Rating: 4.5, RatingCount: 18, Unit: "kg", Village: "Kudlu", VillageID: "v1", SellerID: "u10", Seller: "Kudlu Fresh Farms", Available: true, Stock: 50, Description: "Locally grown red onions with strong flavor."},
+	{ID: "p4", Name: "Farm Milk", Category: "Dairy", Price: 58, Rating: 4.9, RatingCount: 31, Unit: "litre", Village: "Kudlu", VillageID: "v1", SellerID: "u11", Seller: "Kudlu Dairy Co-op", Available: true, Stock: 18, Description: "Fresh farm milk collected from local dairy farmers."},
+
+	// Anekal
+	{ID: "p5", Name: "Village Mango", Category: "Fruits", Price: 72, Rating: 4.9, RatingCount: 42, Unit: "kg", Village: "Anekal", VillageID: "v2", SellerID: "u6", Seller: "Sunrise Orchard", Available: true, Stock: 18, Description: "Sweet seasonal mangoes from nearby orchard clusters."},
+	{ID: "p6", Name: "Banana", Category: "Fruits", Price: 48, Rating: 4.7, RatingCount: 21, Unit: "dozen", Village: "Anekal", VillageID: "v2", SellerID: "u6", Seller: "Sunrise Orchard", Available: true, Stock: 25, Description: "Naturally ripened village bananas."},
+	{ID: "p7", Name: "Cucumber", Category: "Vegetables", Price: 26, Rating: 4.5, RatingCount: 17, Unit: "kg", Village: "Anekal", VillageID: "v2", SellerID: "u9", Seller: "Hill View Greens", Available: false, Stock: 0, Description: "Fresh crunchy cucumbers for household meals."},
+	{ID: "p8", Name: "Green Beans", Category: "Vegetables", Price: 55, Rating: 4.4, RatingCount: 12, Unit: "kg", Village: "Anekal", VillageID: "v2", SellerID: "u9", Seller: "Hill View Greens", Available: true, Stock: 9, Description: "Freshly harvested green beans."},
+
+	// Nandigama
+	{ID: "p9", Name: "Rice Paddy", Category: "Grains", Price: 44, Rating: 4.6, RatingCount: 28, Unit: "kg", Village: "Nandigama", VillageID: "v3", SellerID: "u7", Seller: "Riverbank Mills", Available: true, Stock: 30, Description: "Traditional grain harvested from local paddy plots."},
+	{ID: "p10", Name: "Brown Rice", Category: "Grains", Price: 68, Rating: 4.8, RatingCount: 19, Unit: "kg", Village: "Nandigama", VillageID: "v3", SellerID: "u7", Seller: "Riverbank Mills", Available: true, Stock: 16, Description: "Naturally processed brown rice from local farms."},
+	{ID: "p11", Name: "Turmeric Powder", Category: "Spices", Price: 160, Rating: 4.9, RatingCount: 33, Unit: "kg", Village: "Nandigama", VillageID: "v3", SellerID: "u12", Seller: "Golden Spice Farm", Available: true, Stock: 7, Description: "Village-grown turmeric processed into fine powder."},
+	{ID: "p12", Name: "Red Chilli Powder", Category: "Spices", Price: 180, Rating: 4.7, RatingCount: 16, Unit: "kg", Village: "Nandigama", VillageID: "v3", SellerID: "u12", Seller: "Golden Spice Farm", Available: true, Stock: 11, Description: "Sun-dried red chillies ground locally."},
+
+	// Kumbakonam
+	{ID: "p13", Name: "Groundnut Oil", Category: "Oils", Price: 185, Rating: 4.8, RatingCount: 25, Unit: "litre", Village: "Kumbakonam", VillageID: "v4", SellerID: "u13", Seller: "Kaveri Oils", Available: true, Stock: 14, Description: "Cold-pressed groundnut oil made locally."},
+	{ID: "p14", Name: "Traditional Rice", Category: "Grains", Price: 95, Rating: 4.9, RatingCount: 36, Unit: "kg", Village: "Kumbakonam", VillageID: "v4", SellerID: "u13", Seller: "Kaveri Oils", Available: true, Stock: 20, Description: "Traditional rice variety sourced from local farmers."},
+	{ID: "p15", Name: "Mango Pickle", Category: "Pickles", Price: 140, Rating: 4.7, RatingCount: 22, Unit: "jar", Village: "Kumbakonam", VillageID: "v4", SellerID: "u14", Seller: "Village Taste Foods", Available: true, Stock: 12, Description: "Homemade spicy mango pickle."},
+
+	// Pollachi
+	{ID: "p16", Name: "Tender Coconut", Category: "Fruits", Price: 45, Rating: 4.8, RatingCount: 29, Unit: "piece", Village: "Pollachi", VillageID: "v5", SellerID: "u15", Seller: "Coconut Valley Farms", Available: true, Stock: 45, Description: "Fresh tender coconuts harvested locally."},
+	{ID: "p17", Name: "Coconut Oil", Category: "Oils", Price: 210, Rating: 4.9, RatingCount: 27, Unit: "litre", Village: "Pollachi", VillageID: "v5", SellerID: "u15", Seller: "Coconut Valley Farms", Available: true, Stock: 11, Description: "Traditional locally processed coconut oil."},
+
+	// Kottayam
+	{ID: "p18", Name: "Kerala Banana", Category: "Fruits", Price: 65, Rating: 4.7, RatingCount: 20, Unit: "kg", Village: "Kottayam", VillageID: "v6", SellerID: "u16", Seller: "Green Kerala Farms", Available: true, Stock: 23, Description: "Fresh traditional Kerala bananas."},
+	{ID: "p19", Name: "Homemade Pickle", Category: "Pickles", Price: 120, Rating: 4.6, RatingCount: 14, Unit: "jar", Village: "Kottayam", VillageID: "v6", SellerID: "u17", Seller: "Grandma's Kitchen", Available: true, Stock: 6, Description: "Traditional homemade village pickle."},
+
+	// Mysuru
+	{ID: "p20", Name: "Ragi Flour", Category: "Traditional Foods", Price: 75, Rating: 4.8, RatingCount: 23, Unit: "kg", Village: "Mysuru Rural", VillageID: "v7", SellerID: "u21", Seller: "Mysuru Millet Farm", Available: true, Stock: 17, Description: "Stone-ground ragi flour from local millet farms."},
+	{ID: "p21", Name: "Jaggery", Category: "Traditional Foods", Price: 90, Rating: 4.9, RatingCount: 30, Unit: "kg", Village: "Mysuru Rural", VillageID: "v7", SellerID: "u21", Seller: "Mysuru Millet Farm", Available: true, Stock: 24, Description: "Natural jaggery prepared by local producers."},
+
+	// Nashik
+	{ID: "p22", Name: "Green Grapes", Category: "Fruits", Price: 110, Rating: 4.8, RatingCount: 26, Unit: "kg", Village: "Nashik Rural", VillageID: "v8", SellerID: "u22", Seller: "Nashik Fresh Orchards", Available: true, Stock: 28, Description: "Fresh locally grown table grapes."},
+	{ID: "p23", Name: "Onion Pickle", Category: "Pickles", Price: 130, Rating: 4.5, RatingCount: 11, Unit: "jar", Village: "Nashik Rural", VillageID: "v8", SellerID: "u23", Seller: "Nashik Village Foods", Available: true, Stock: 8, Description: "Homestyle onion pickle prepared in small batches."},
 }
 
 var DefaultUsers = []User{
@@ -333,29 +373,124 @@ var DefaultUsers = []User{
 
 var DefaultOrders = []Order{
 	{
-		ID:         "o1",
-		CustomerID: "u1",
-		SellerID:   "u2",
-		VillageID:  "v1",
-		Items:      []OrderItem{{ProductID: "p1", Name: "Fresh Tomato", Unit: "kg", SellerID: "u2", Quantity: 2, Price: 38, LineTotal: 76}},
-		Subtotal:   76,
-		Total:      76,
-		Status:     OrderPending,
-		CreatedAt:  "2026-10-01T09:00:00Z",
-		UpdatedAt:  "2026-10-01T09:00:00Z",
+		ID: "o1", CustomerID: "u1", SellerID: "u5", VillageID: "v1",
+		Items:    []OrderItem{{ProductID: "p1", Name: "Fresh Tomato", Unit: "kg", SellerID: "u5", Quantity: 2, Price: 38, LineTotal: 76}},
+		Subtotal: 76, DeliveryFee: 0, Total: 76, FulfillmentType: "pickup", Address: "Kudlu Village Market",
+		Payment: OrderPayment{Method: "cash", Status: "pending", Amount: 76}, Status: OrderPending,
+		StatusHistory: []OrderStatusEvent{{Status: OrderPending, ActorID: "u1", ActorRole: RoleCustomer, Note: "Order placed", CreatedAt: "2026-10-01T09:00:00Z"}},
+		CreatedAt:     "2026-10-01T09:00:00Z", UpdatedAt: "2026-10-01T09:00:00Z",
 	},
 	{
-		ID:          "o2",
-		CustomerID:  "u1",
-		SellerID:    "u2",
-		VillageID:   "v2",
-		Items:       []OrderItem{{ProductID: "p2", Name: "Village Mango", Unit: "kg", SellerID: "u2", Quantity: 1, Price: 72, LineTotal: 72}},
-		Subtotal:    72,
-		DeliveryFee: 25,
-		Total:       97,
-		Status:      OrderOutForDelivery,
-		CreatedAt:   "2026-10-02T12:30:00Z",
-		UpdatedAt:   "2026-10-02T12:45:00Z",
+		ID: "o2", CustomerID: "u1", SellerID: "u6", VillageID: "v2",
+		Items:    []OrderItem{{ProductID: "p5", Name: "Village Mango", Unit: "kg", SellerID: "u6", Quantity: 1, Price: 72, LineTotal: 72}},
+		Subtotal: 72, DeliveryFee: 25, Total: 97, FulfillmentType: "delivery", Address: "Anekal Main Road, House 18",
+		Payment: OrderPayment{Method: "upi", Status: "paid", Amount: 97}, PaymentID: "pay2", Status: OrderOutForDelivery,
+		StatusHistory: []OrderStatusEvent{
+			{Status: OrderPending, ActorID: "u1", ActorRole: RoleCustomer, Note: "Order placed", CreatedAt: "2026-10-02T12:30:00Z"},
+			{Status: OrderConfirmed, ActorID: "u6", ActorRole: RoleSeller, Note: "Seller confirmed", CreatedAt: "2026-10-02T12:35:00Z"},
+			{Status: OrderPreparing, ActorID: "u6", ActorRole: RoleSeller, Note: "Preparing mangoes", CreatedAt: "2026-10-02T12:40:00Z"},
+			{Status: OrderOutForDelivery, ActorID: "u3", ActorRole: RoleDeliveryAgent, Note: "Out for delivery", CreatedAt: "2026-10-02T12:45:00Z"},
+		},
+		CreatedAt: "2026-10-02T12:30:00Z", UpdatedAt: "2026-10-02T12:45:00Z",
+	},
+	{
+		ID: "o3", CustomerID: "u18", SellerID: "u13", VillageID: "v4",
+		Items: []OrderItem{
+			{ProductID: "p13", Name: "Groundnut Oil", Unit: "litre", SellerID: "u13", Quantity: 2, Price: 185, LineTotal: 370},
+			{ProductID: "p14", Name: "Traditional Rice", Unit: "kg", SellerID: "u13", Quantity: 2, Price: 95, LineTotal: 190},
+		},
+		Subtotal: 560, DeliveryFee: 30, Total: 590, FulfillmentType: "delivery", Address: "Kumbakonam East Street, House 42",
+		Payment: OrderPayment{Method: "upi", Status: "paid", Amount: 590}, PaymentID: "pay3", Status: OrderDelivered,
+		StatusHistory: []OrderStatusEvent{
+			{Status: OrderPending, ActorID: "u18", ActorRole: RoleCustomer, CreatedAt: "2026-10-03T08:10:00Z"},
+			{Status: OrderConfirmed, ActorID: "u13", ActorRole: RoleSeller, CreatedAt: "2026-10-03T08:20:00Z"},
+			{Status: OrderPreparing, ActorID: "u13", ActorRole: RoleSeller, CreatedAt: "2026-10-03T09:00:00Z"},
+			{Status: OrderPacked, ActorID: "u13", ActorRole: RoleSeller, CreatedAt: "2026-10-03T09:30:00Z"},
+			{Status: OrderDelivered, ActorID: "u20", ActorRole: RoleDeliveryAgent, CreatedAt: "2026-10-03T12:15:00Z"},
+		},
+		CreatedAt: "2026-10-03T08:10:00Z", UpdatedAt: "2026-10-03T12:15:00Z",
+	},
+	{
+		ID: "o4", CustomerID: "u19", SellerID: "u15", VillageID: "v5",
+		Items:    []OrderItem{{ProductID: "p16", Name: "Tender Coconut", Unit: "piece", SellerID: "u15", Quantity: 4, Price: 45, LineTotal: 180}},
+		Subtotal: 180, DeliveryFee: 20, Total: 200, FulfillmentType: "delivery", Address: "Pollachi Bus Stand Road",
+		Payment: OrderPayment{Method: "cash", Status: "pending", Amount: 200}, Status: OrderConfirmed,
+		StatusHistory: []OrderStatusEvent{
+			{Status: OrderPending, ActorID: "u19", ActorRole: RoleCustomer, CreatedAt: "2026-10-04T10:00:00Z"},
+			{Status: OrderConfirmed, ActorID: "u15", ActorRole: RoleSeller, CreatedAt: "2026-10-04T10:15:00Z"},
+		},
+		CreatedAt: "2026-10-04T10:00:00Z", UpdatedAt: "2026-10-04T10:15:00Z",
+	},
+	{
+		ID: "o5", CustomerID: "u1", SellerID: "u5", VillageID: "v1",
+		Items: []OrderItem{
+			{ProductID: "p2", Name: "Fresh Spinach", Unit: "bunch", SellerID: "u5", Quantity: 3, Price: 30, LineTotal: 90},
+			{ProductID: "p2", Name: "Fresh Spinach", Unit: "bunch", SellerID: "u5", Quantity: 2, Price: 30, LineTotal: 60},
+		},
+		Subtotal: 150, DeliveryFee: 25, Total: 175, FulfillmentType: "delivery", Address: "Kudlu Lake Road",
+		Payment: OrderPayment{Method: "upi", Status: "paid", Amount: 175}, PaymentID: "pay5", Status: OrderPreparing,
+		StatusHistory: []OrderStatusEvent{
+			{Status: OrderPending, ActorID: "u1", ActorRole: RoleCustomer, CreatedAt: "2026-10-04T15:00:00Z"},
+			{Status: OrderConfirmed, ActorID: "u5", ActorRole: RoleSeller, CreatedAt: "2026-10-04T15:10:00Z"},
+			{Status: OrderPreparing, ActorID: "u5", ActorRole: RoleSeller, CreatedAt: "2026-10-04T15:30:00Z"},
+		},
+		CreatedAt: "2026-10-04T15:00:00Z", UpdatedAt: "2026-10-04T15:30:00Z",
+	},
+	{
+		ID: "o6", CustomerID: "u18", SellerID: "u12", VillageID: "v3",
+		Items:    []OrderItem{{ProductID: "p11", Name: "Turmeric Powder", Unit: "kg", SellerID: "u12", Quantity: 1, Price: 160, LineTotal: 160}},
+		Subtotal: 160, DeliveryFee: 20, Total: 180, FulfillmentType: "delivery", Address: "Nandigama Market Road",
+		Payment: OrderPayment{Method: "card", Status: "paid", Amount: 180}, PaymentID: "pay6", Status: OrderDelivered,
+		StatusHistory: []OrderStatusEvent{
+			{Status: OrderPending, ActorID: "u18", ActorRole: RoleCustomer, CreatedAt: "2026-10-01T11:00:00Z"},
+			{Status: OrderConfirmed, ActorID: "u12", ActorRole: RoleSeller, CreatedAt: "2026-10-01T11:10:00Z"},
+			{Status: OrderDelivered, ActorID: "u3", ActorRole: RoleDeliveryAgent, CreatedAt: "2026-10-01T14:00:00Z"},
+		},
+		CreatedAt: "2026-10-01T11:00:00Z", UpdatedAt: "2026-10-01T14:00:00Z",
+	},
+	{
+		ID: "o7", CustomerID: "u19", SellerID: "u16", VillageID: "v6",
+		Items:    []OrderItem{{ProductID: "p18", Name: "Kerala Banana", Unit: "kg", SellerID: "u16", Quantity: 2, Price: 65, LineTotal: 130}},
+		Subtotal: 130, DeliveryFee: 15, Total: 145, FulfillmentType: "delivery", Address: "Kottayam Central Road",
+		Payment: OrderPayment{Method: "upi", Status: "paid", Amount: 145}, PaymentID: "pay7", Status: OrderCancelled,
+		StatusHistory: []OrderStatusEvent{
+			{Status: OrderPending, ActorID: "u19", ActorRole: RoleCustomer, CreatedAt: "2026-10-02T16:00:00Z"},
+			{Status: OrderCancelled, ActorID: "u19", ActorRole: RoleCustomer, Note: "Customer cancelled before preparation", CreatedAt: "2026-10-02T16:20:00Z"},
+		},
+		CreatedAt: "2026-10-02T16:00:00Z", UpdatedAt: "2026-10-02T16:20:00Z",
+	},
+	{
+		ID: "o8", CustomerID: "u1", SellerID: "u21", VillageID: "v7",
+		Items:    []OrderItem{{ProductID: "p20", Name: "Ragi Flour", Unit: "kg", SellerID: "u21", Quantity: 2, Price: 75, LineTotal: 150}},
+		Subtotal: 150, DeliveryFee: 20, Total: 170, FulfillmentType: "pickup", Address: "Mysuru Rural Collection Point",
+		Payment: OrderPayment{Method: "cash", Status: "paid", Amount: 170}, PaymentID: "pay8", Status: OrderReadyForPickup,
+		StatusHistory: []OrderStatusEvent{
+			{Status: OrderPending, ActorID: "u1", ActorRole: RoleCustomer, CreatedAt: "2026-10-03T17:00:00Z"},
+			{Status: OrderConfirmed, ActorID: "u21", ActorRole: RoleSeller, CreatedAt: "2026-10-03T17:10:00Z"},
+			{Status: OrderReadyForPickup, ActorID: "u21", ActorRole: RoleSeller, CreatedAt: "2026-10-03T18:00:00Z"},
+		},
+		CreatedAt: "2026-10-03T17:00:00Z", UpdatedAt: "2026-10-03T18:00:00Z",
+	},
+	{
+		ID: "o9", CustomerID: "u18", SellerID: "u22", VillageID: "v8",
+		Items:    []OrderItem{{ProductID: "p22", Name: "Green Grapes", Unit: "kg", SellerID: "u22", Quantity: 3, Price: 110, LineTotal: 330}},
+		Subtotal: 330, DeliveryFee: 25, Total: 355, FulfillmentType: "delivery", Address: "Nashik Rural Main Road",
+		Payment: OrderPayment{Method: "upi", Status: "paid", Amount: 355}, PaymentID: "pay9", Status: OrderPacked,
+		StatusHistory: []OrderStatusEvent{
+			{Status: OrderPending, ActorID: "u18", ActorRole: RoleCustomer, CreatedAt: "2026-10-04T08:00:00Z"},
+			{Status: OrderConfirmed, ActorID: "u22", ActorRole: RoleSeller, CreatedAt: "2026-10-04T08:15:00Z"},
+			{Status: OrderPreparing, ActorID: "u22", ActorRole: RoleSeller, CreatedAt: "2026-10-04T09:00:00Z"},
+			{Status: OrderPacked, ActorID: "u22", ActorRole: RoleSeller, CreatedAt: "2026-10-04T10:00:00Z"},
+		},
+		CreatedAt: "2026-10-04T08:00:00Z", UpdatedAt: "2026-10-04T10:00:00Z",
+	},
+	{
+		ID: "o10", CustomerID: "u19", SellerID: "u14", VillageID: "v4",
+		Items:    []OrderItem{{ProductID: "p15", Name: "Mango Pickle", Unit: "jar", SellerID: "u14", Quantity: 2, Price: 140, LineTotal: 280}},
+		Subtotal: 280, DeliveryFee: 0, Total: 280, FulfillmentType: "pickup", Address: "Kumbakonam Village Market",
+		Payment: OrderPayment{Method: "cash", Status: "pending", Amount: 280}, Status: OrderPending,
+		StatusHistory: []OrderStatusEvent{{Status: OrderPending, ActorID: "u19", ActorRole: RoleCustomer, Note: "Pickup order placed", CreatedAt: "2026-10-05T09:00:00Z"}},
+		CreatedAt:     "2026-10-05T09:00:00Z", UpdatedAt: "2026-10-05T09:00:00Z",
 	},
 }
 

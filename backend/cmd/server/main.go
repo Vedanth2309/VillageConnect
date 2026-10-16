@@ -46,7 +46,7 @@ func main() {
 	}
 
 	userService := services.NewUserService(store)
-	searchService := search.NewService(store, cfg.ElasticsearchURL, cfg.ElasticsearchIndex)
+	searchService := search.NewService(store, cfg.ElasticsearchURL, cfg.ElasticsearchIndex, cfg.ElasticsearchAPIKey)
 	catalogService := services.NewCatalogService(store, searchService)
 	orderService := services.NewOrderService(store)
 	deliveryService := services.NewDeliveryService(store, orderService)

@@ -196,50 +196,79 @@ func (s *ReviewService) Create(ctx context.Context, customerID, orderID, product
 	return &review, nil
 }
 
-func (s *UserService) Register(ctx context.Context, name, email, phone, password, villageID, rawRole string) (*models.User, error) {
-	name = strings.TrimSpace(name)
-	email = strings.ToLower(strings.TrimSpace(email))
-	if name == "" || email == "" || len(password) < 8 || len(password) > 72 {
-		return nil, ErrInvalidInput
-	}
-	address, err := mail.ParseAddress(email)
-	if err != nil || address.Address != email {
-		return nil, ErrInvalidInput
-	}
+func (s *UserService) Register(
+    ctx context.Context,
+    name, email, phone, password, villageID, rawRole string,
+) (*models.User, error) {
+    name = strings.TrimSpace(name)
+    email = strings.ToLower(strings.TrimSpace(email))
+    phone = strings.TrimSpace(phone)
+    villageID = strings.TrimSpace(villageID)
 
-	role := models.RoleCustomer
-	switch strings.ToLower(strings.TrimSpace(rawRole)) {
-	case "", "customer":
-	default:
-		// Elevated roles are assigned through trusted administrative
-		// provisioning, never from a public registration payload.
-		return nil, ErrInvalidInput
-	}
+    if name == "" || email == "" ||
+        len(password) < 8 || len(password) > 72 {
+        return nil, ErrInvalidInput
+    }
 
-	if _, err := s.repo.GetUserByEmailForAuth(ctx, email); err == nil {
-		return nil, ErrConflict
-	} else if !isMissingUser(err) {
-		return nil, err
-	}
+    address, err := mail.ParseAddress(email)
+    if err != nil || address.Address != email {
+        return nil, ErrInvalidInput
+    }
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
-	if err != nil {
-		return nil, err
-	}
-	user := models.User{
-		ID:           fmt.Sprintf("u%d", time.Now().UnixNano()),
-		Name:         name,
-		Email:        email,
-		Phone:        strings.TrimSpace(phone),
-		VillageID:    strings.TrimSpace(villageID),
-		Role:         role,
-		Verified:     true,
-		PasswordHash: string(hash),
-	}
-	if err := s.repo.CreateUser(ctx, user); err != nil {
-		return nil, translateRepositoryError(err)
-	}
-	return &user, nil
+    // Public registration allows customers and sellers only.
+    // Admin accounts must be created through trusted provisioning.
+    var role models.UserRole
+
+    switch strings.ToLower(strings.TrimSpace(rawRole)) {
+    case "", "customer":
+        role = models.RoleCustomer
+
+    case "seller":
+        role = models.RoleSeller
+
+        if villageID == "" {
+            return nil, ErrInvalidInput
+        }
+
+    default:
+        return nil, ErrInvalidInput
+    }
+
+    if _, err := s.repo.GetUserByEmailForAuth(ctx, email); err == nil {
+        return nil, ErrConflict
+    } else if !isMissingUser(err) {
+        return nil, err
+    }
+
+    hash, err := bcrypt.GenerateFromPassword(
+        []byte(password), 12,
+    )
+    if err != nil {
+        return nil, err
+    }
+
+    user := models.User{
+        ID:           fmt.Sprintf("u%d", time.Now().UnixNano()),
+        Name:         name,
+        Email:        email,
+        Phone:        phone,
+        VillageID:    villageID,
+        Role:         role,
+        Verified:     role == models.RoleCustomer,
+        PasswordHash: string(hash),
+    }
+
+    // Sellers must be approved by an administrator
+    // before they can publish products.
+    if role == models.RoleSeller {
+        user.SellerStatus = "pending"
+    }
+
+    if err := s.repo.CreateUser(ctx, user); err != nil {
+        return nil, translateRepositoryError(err)
+    }
+
+    return &user, nil
 }
 
 func (s *UserService) Authenticate(ctx context.Context, email, password string) (*models.User, error) {

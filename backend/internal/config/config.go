@@ -15,6 +15,7 @@ type Config struct {
 	JWTSecret          string
 	ElasticsearchURL   string
 	ElasticsearchIndex string
+	ElasticsearchAPIKey string
 }
 
 func Load() Config {
@@ -26,6 +27,7 @@ func Load() Config {
 		JWTSecret:          getEnv("JWT_SECRET", "villageconnect-dev-secret-change-me"),
 		ElasticsearchURL:   getEnv("ELASTICSEARCH_URL", "http://localhost:9200"),
 		ElasticsearchIndex: getEnv("ELASTICSEARCH_INDEX", "villageconnect-products"),
+		ElasticsearchAPIKey: getEnv("ELASTICSEARCH_API_KEY", ""),
 	}
 }
 
